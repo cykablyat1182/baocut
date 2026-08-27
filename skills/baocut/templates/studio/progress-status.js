@@ -163,6 +163,7 @@
       ...status,
       active: true,
       phase: projectPhase(job, status.phase),
+      resourceWait: job.phase === 'model-wait' ? 'model-store' : null,
       pct,
       detail: job.detail || '',
       liveSegments: Array.isArray(job.liveSegments) ? job.liveSegments : [],

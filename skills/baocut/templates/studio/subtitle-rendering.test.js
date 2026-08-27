@@ -52,6 +52,49 @@ test('shared Rust/preview subtitle contract fixtures stay stable', () => {
   }
 });
 
+test('row deficit mirrors flow-core dwell, sentence-level, and exclusions', () => {
+  const words = Array.from({ length: 9 }, (_, i) => ({ id: `w${i}`, text: `w${i}` }));
+  const cues = [0, 1, 2].map((n) => ({
+    id: `c${n}`, words: words.slice(n * 3, n * 3 + 3),
+  }));
+  const sentence = {
+    id: 's1', trans: '短译文', sourceWordIds: words.map((word) => word.id),
+    correspondence: 'block',
+  };
+  const whole = {
+    id: 's1', sid: 's1', text: '短译文', start: 0, end: 6.4,
+    sourceWordIds: words.map((word) => word.id),
+  };
+  const issue = subtitle.rowDeficitStats({ cues, sentences: [sentence], transCues: [whole] });
+  assert.deepEqual(issue, [{
+    sentence: 's1', sourceRows: 3, transCues: 1, maxDwellSec: 6.4,
+  }]);
+
+  // Condition 3 is the align-stale set (`aligned === false` — the sentence has a
+  // fallback translation cue), NOT the translation-stale set. Getting the two
+  // confused is wrong in both directions: F4 gets double-reported as a stuck row,
+  // and sentences whose source text changed stop being judged at all.
+  assert.deepEqual(subtitle.rowDeficitStats({
+    cues, sentences: [{ ...sentence, aligned: false }], transCues: [whole],
+  }), [], 'F4 belongs to align-stale — not reported twice');
+  assert.equal(subtitle.rowDeficitStats({
+    cues, sentences: [{ ...sentence, stale: true }], transCues: [whole],
+  }).length, 1, 'a translation-stale sentence still takes part in the rule');
+  assert.deepEqual(subtitle.rowDeficitStats({
+    cues, sentences: [{ ...sentence, mode: 'independent' }], transCues: [whole],
+  }), []);
+  assert.equal(subtitle.rowDeficitStats({
+    cues,
+    sentences: [{ ...sentence, correspondence: 'sentence' }],
+    transCues: [{ ...whole, end: 3.2 }],
+  }).length, 1, 'three-row sentence-level correspondence is independently actionable');
+  assert.equal(subtitle.rowDeficitStats({
+    cues: cues.slice(0, 2),
+    sentences: [{ ...sentence, sourceWordIds: words.slice(0, 6).map((word) => word.id) }],
+    transCues: [{ ...whole, end: 3.2, sourceWordIds: words.slice(0, 6).map((word) => word.id) }],
+  }).length, 0, 'legal two-row many-to-one below dwell threshold stays quiet');
+});
+
 test('Canvas scale and frame fit use the 540 px short-edge contract', () => {
   assert.equal(subtitle.referenceScale(960, 540), 1);
   assert.equal(subtitle.referenceScale(1080, 1920), 2);

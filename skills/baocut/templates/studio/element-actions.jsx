@@ -77,6 +77,20 @@ function useElementActions(deps) {
     });
   }, [applyTimelineOps, duration, setSel, time, undoAction]);
 
+  // 模板贴纸：模板库随构建走（内置 path 配方），所以不上传、不注册 source，
+  // 一条 addElement 就成。像素由 wasm overlay 出，与导出同一份光栅器。
+  const addStickerElement = useCallback((templateId) => {
+    if (!EOPS || !templateId) return Promise.resolve(null);
+    const op = EOPS.addStickerElement({ templateId, time: time(), duration: duration() });
+    return applyTimelineOps([op], '添加贴纸元素').then((result) => {
+      const id = addedElementId(result);
+      if (!id) return null;
+      setSel({ kind: 'el', id });
+      toast('已在播放头处添加贴纸', { variant: 'positive', action: undoAction() });
+      return id;
+    });
+  }, [applyTimelineOps, duration, setSel, time, undoAction]);
+
   const addWatermark = useCallback((text) => {
     if (!EOPS) return Promise.resolve(null);
     return applyTimelineOps([EOPS.addWatermark({ text })], '添加水印').then((result) => {
@@ -183,7 +197,7 @@ function useElementActions(deps) {
   }, [applyTimelineOps, findElement, setSel, undoAction]);
 
   return {
-    addTextElement, addImageElement, addWatermark,
+    addTextElement, addImageElement, addStickerElement, addWatermark,
     moveElement, setElementText, patchElement, removeElement, replaceElementImage,
   };
 }

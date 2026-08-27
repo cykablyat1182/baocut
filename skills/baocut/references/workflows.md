@@ -86,6 +86,11 @@ continued—repeat step 2 and verify the project page before proceeding.
 
 ### 4. Run the pipeline
 
+`auto` defaults to **fast mode**: it completes transcription, polish,
+translation, and required alignment, but skips optional closing refinement.
+Use `--refine` only when the user chooses quality-first execution before the
+run.
+
 ```bash
 bin/baocut auto "<dir>/My Talk.bcut" --llm agent --jsonl
 ```
@@ -95,6 +100,13 @@ Add one or more translations:
 ```bash
 bin/baocut auto "<dir>/My Talk.bcut" --llm agent \
   --lang zh-Hans --lang en --jsonl
+```
+
+For an explicit quality-first run:
+
+```bash
+bin/baocut auto "<dir>/My Talk.bcut" --llm agent \
+  --lang zh-Hans --refine --jsonl
 ```
 
 Default-path rule: when the user has not named a download directory, use the
@@ -142,9 +154,29 @@ completed is repeated.
 
 The CLI still auto-prepares models for direct `auto`/`transcribe` compatibility;
 the explicit command above keeps a first multi-gigabyte download out of the
-pipeline timeout window. After `auto` returns, repeat step 2 one final time and
-hand off the verified current URL. For every URL-media run, also read the
-authoritative downloaded video path and report that exact path to the user:
+pipeline timeout window. After `auto` returns, run `check --strict`, repeat step
+2 one final time, and hand off the verified current URL.
+
+In fast mode, read `data.refineOffer[]` from the terminal `done` event. When any
+language has `available:true`, the task summary must ask whether the user wants
+optional refinement:
+
+- state the benefit from `benefit.prioritySentences`, `benefit.allSentences`,
+  and `benefit.warningCodes`;
+- state the cost from `cost.sentenceItems`, `expectedRounds` / `maxRounds`,
+  `callPlan`, and `recommendedEffort`; never invent minutes or call counts;
+- show `command`, explain that it may improve line timing/width but may leave
+  residuals, and wait for an affirmative answer before running it;
+- when `recommended:false`, say that the remaining gain is soft/gray-band and
+  recommend keeping fast mode.
+
+After acceptance, run the offer's priority command through the normal Agent
+task loop, preserve the original LLM channel, and re-run `check --strict`. Do
+not rerun `auto`. An explicit `--refine` run already represents prior user
+consent and does not need this closing question.
+
+For every URL-media run, also read the authoritative downloaded video path and
+report that exact path to the user:
 
 ```bash
 bin/baocut --json project show "<dir>/My Talk.bcut"
@@ -191,7 +223,7 @@ after the ASR pass, so pre-download it with
 `--model remote:<alias>/<model>` runs the transcription on a paired machine on
 the same local network instead of this one. The project, `transcript.json`, and
 every other artifact are still written here — only the audio and the model
-parameters go to the node, and only rows come back.
+parameters go to the node, and only rows plus optional speaker ranges come back.
 
 The other machine runs `bcut worker` and shows a 6-digit pairing code; pair once
 from this machine, then use the model id like any other:
@@ -203,8 +235,24 @@ bin/baocut transcribe "/path/input.mp4" --project "/path/demo.bcut" \
   --model remote:mac-studio/moss-transcribe-diarize --jsonl
 ```
 
-`remote list --json` reports each node's `status` and available `models`; use it
-before assuming a node is reachable. If the node is offline, too old, or missing
+For Qwen or Whisper, `--speakers N` is also available when that node reports its
+separate `speaker-diarization` package as ready. The extra Pyannote + WeSpeaker
+pass runs on the node, not on this machine, and N remains the cluster cap:
+
+```bash
+bin/baocut transcribe "/path/input.mp4" --project "/path/demo.bcut" \
+  --model remote:mac-studio/qwen3-asr-1.7b --speakers 3 --jsonl
+```
+
+`remote list --json` reports each node's `status` and cached `models`; use it
+before assuming a node is reachable. After installing a model on a running node,
+run `bin/baocut --json remote models <alias>` to rescan immediately; its
+`modelsEnumeratedAt` records when that list was produced. When a node cannot be
+reached or paired, run
+`bin/baocut --json remote doctor <addr>` first — it is read-only, always exits `0`,
+and returns a closed-set `verdict.code` plus a ready-to-read `report` naming the
+actual blocker (per-app network filter, firewall, wrong port, not paired yet).
+If the node is offline, too old, or missing
 the model, the command fails **before** decoding with a clear `kind` and does
 **not** silently fall back to this machine — re-run with a local model when that
 is what the user wants. Everything else (progress events, cancellation, review

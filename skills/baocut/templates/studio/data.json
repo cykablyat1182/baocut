@@ -19,6 +19,7 @@
   "pct": 0,
   "detail": "等待 CLI 同步项目数据…"
  },
+ "initialSegments": null,
  "speakers": {},
  "chapters": [],
  "style": {

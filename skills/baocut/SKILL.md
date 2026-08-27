@@ -13,8 +13,8 @@ description: >-
   documentation tasks follow repository instructions unless they also operate
   the product or a `.bcut` project.
 metadata:
-  version: "1.1.0"
-  minAppVersion: "1.1.0"
+  version: "1.1.3"
+  minAppVersion: "1.1.3"
 ---
 
 # BaoCut
@@ -162,7 +162,9 @@ If the resolver exits 3, follow its guidance instead of bypassing the check.
   projects library first, start the preview server, then run the pipeline;
   read [references/workflows.md](references/workflows.md).
 - For a complete local pipeline, use `auto`; read
-  [references/workflows.md](references/workflows.md).
+  [references/workflows.md](references/workflows.md). It defaults to the fast
+  path without closing refinement; only pass `--refine` after the user chooses
+  quality-first execution.
 - To run transcription on another machine on the same local network instead of
   this one, read the remote-node note in
   [references/workflows.md](references/workflows.md).
@@ -171,7 +173,9 @@ If the resolver exits 3, follow its guidance instead of bypassing the check.
   its "short-job fast path" is the whole procedure (see "Right-size the run"
   below). For long media its on-demand worker
   rules — pool sized from the actual page plan (translate uses
-  `ceil(source words / 2200)`; align also enforces at most 40 items and a
+  `ceil(source words / 880)` by default (`--align-fusion rows`), or `/2200`
+  under `--align-fusion on|off`; align
+  also enforces at most 40 items and a
   complexity budget, all capped by real slots), per-stage worker tiers (mid-tier for
   translate/polish, high-reasoning tier for align and repair), hand-written
   align answers with no scripted cutting and no unchanged resubmits — and its
@@ -294,6 +298,11 @@ If the resolver exits 3, follow its guidance instead of bypassing the check.
 - Run `check --strict` before claiming a deliverable is ready. Exit 2 means the
   quality gate found unresolved work; exit 3 means a compatibility or worker
   handoff condition.
+- Treat `source-language-mismatch`, `target-language-mismatch`,
+  `translation-placeholder`, `translation-source-copy`, and
+  `translation-duplicate-collapse` as hard failures. Follow the returned
+  sentence-scoped fix command; do not bypass the validator or reuse an older
+  task response manually.
 - Re-read state after every edit. Exit 0 proves the mutation committed, not that
   its visual timing or composition is correct; use list commands and `frames`,
   `broll preview`, or `animation preview` as appropriate.
@@ -334,33 +343,49 @@ and keep the shape fixed. For a media file or URL, `yt-dlp --print
 duration_string` / `ffprobe` or `project show` tells you the duration up front.
 
 - **Short clip (under ~15 minutes, transcript on one page — up to ~2200 source
-  words):** the Agent-backed pipeline is a fixed serial chain of five to seven
+  words):** the fast Agent-backed pipeline is a fixed serial chain of five to six
   calls — `analysis` → `polish` → `translate-brief` → `translate` →
-  `align-edges`, plus `align-rewrite` only if a chunk is over the hard width
-  and one closing `align-edges` repair call from `auto`'s refine pass. Every
+  `align-edges`, plus `align-rewrite` only if a chunk is over the hard width;
+  closing refinement is not part of the default run. Every
   call has exactly one pending item, so there is nothing to parallelize:
   answer them yourself in the orchestrating session, one after another,
   claim → read contract and payload in the same step → write → `submit
   --next`. Do not start worker subagents, do not spawn a task-tracker of
   seven pipeline steps, and do not read the fleet-sizing rules of
   [references/agent-tasks.md](references/agent-tasks.md) as instructions for
-  this case — its "short-job fast path" section is what applies. Expected
-  wall clock on native hardware: transcription of a 2-minute clip finishes
-  within about 3 minutes including model checks, and each AI call takes about
-  one minute of your own answering; the whole task should be over in roughly
-  10 minutes with under 40 tool calls.
+  this case — its "short-job fast path" section is what applies. Two settings
+  are part of this shape, not optional tuning: export
+  `BCUT_LLM_MAX_WORKERS=1` before starting `auto`, so the engine plans one
+  polish page for the whole transcript instead of splitting it across the
+  default three worker slots (a 1500-word clip otherwise dispatches three
+  ~600-word polish pages plus a `seam-repair`, and every extra page waits in
+  the queue while you answer the previous one); and watch the JSONL only for
+  `"event":"(batch-dispatch|error|done)"` — a filter that also matches
+  `transcribe` stage lines floods the monitor with one event per recognized
+  segment. Expected wall clock on native hardware: transcription of a
+  2-minute clip finishes within about 3 minutes including model checks, and
+  each AI call takes about one minute of your own answering (the single
+  `translate` page of an 8–10 minute clip is the largest, several minutes);
+  the whole task should be over in roughly 10 minutes with under 40 tool
+  calls.
 - **Long media (a talk, a lecture):** follow the on-demand worker rules in
   [references/agent-tasks.md](references/agent-tasks.md) — pool size from the
   `workerPlan`, tiers per stage, `--next` chaining.
 
 Whatever the size, watch the JSONL event stream through one `Monitor` (or
-one background tail) rather than polling, and apply a stall budget: on a
+one background tail) rather than polling, and apply a stall budget: a
+`phase:"model-wait"` event is an explicit, cancellable wait for another model
+download or repair, not a silent stall; keep watching until it advances or
+cancel the run if that model work is no longer wanted. Otherwise, on a
 short clip, no new `progress` event for 3 minutes during `transcribe` means
 something is wrong — check `--json version` (`target`, `backend`, `rosetta`),
 `ps` for the process's CPU time, and the project's progress file — do not
 wait for a 20-minute monitor timeout. Read the JSONL's `event:"done"` (or an
 `error` event) as the terminal signal: after it, do not `task claim` again;
-run `check --strict`, `project show`, and the preview verification.
+run `check --strict`, `project show`, and the preview verification. In fast
+mode, summarize `data.refineOffer[]`, state the optional refinement's benefit
+and cost, and ask whether the user wants it; do not start it without a new
+affirmative answer.
 
 When the resolver reports a version or handshake problem, follow
 [references/updates.md](references/updates.md) and do not bypass the refreshed
@@ -368,5 +393,5 @@ CLI handshake.
 
 Use `spec` as the machine-readable source of supported commands and flags. Keep
 project paths quoted and use BCP-47 language tags such as `zh-Hans`, `en`, or
-`ja`. This skill requires CLI spec `>=1.11,<2.0`; if a recipe and `spec` differ,
+`ja`. This skill requires CLI spec `>=1.31,<2.0`; if a recipe and `spec` differ,
 stop and follow the compatibility error rather than guessing.

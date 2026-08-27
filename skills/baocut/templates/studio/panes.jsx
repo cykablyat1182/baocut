@@ -599,6 +599,12 @@ function TranscriptPane() {
       <div className="vk-transcript__toolbar">
         <QBtn icon="search" size="S" tip="查找和替换" selected={find.open} onClick={find.toggle} />
         <HistoryBtn />
+        {doc.initialSegments && doc.initialSegments.active && doc.initialSegments.provisional ? (
+          <span className="vk-initial-segments"
+            data-tip={`基于 ${doc.initialSegments.source} ASR 分段 · ${doc.initialSegments.paragraphs} 段；编辑后转为正式分段`}>
+            初始分段
+          </span>
+        ) : null}
         <span className="vk-spacer"></span>
         <window.StylePicker ctx="sub" />
         {/* 顺序对齐 Mac TranscriptPaneToolbar.swift:46-87：语义分段（最基础的
@@ -1150,6 +1156,10 @@ function TranslateBody() {
   const done = sentences.filter((s) => (s.trans || '').trim()).length;
   const untrans = sentences.length - done;
   const stale = sentences.filter((s) => s.stale).length;
+  const stuck = useMemo(
+    () => window.BCS_SUBTITLE.rowDeficitStats(doc).length,
+    [sentences, doc.transCues, doc.cues],
+  );
   const pct = Math.round((done / Math.max(1, sentences.length)) * 100);
   const translating = doc.status.phase === 'translating';
   const player = usePlayer();
@@ -1230,6 +1240,7 @@ function TranslateBody() {
           <span className="tr-stat"><b>{sentences.length}</b> 句</span>
           <span className="tr-stat"><b>{done}</b> 已翻译</span>
           {untrans ? <span className="tr-stat tr-stat--warn"><b>{untrans}</b> 未翻译</span> : null}
+          {stuck ? <span className="tr-stat tr-stat--warn" data-tip="译文行停留过久并覆盖多条原文字幕"><b>{stuck}</b> 处黏结</span> : null}
           {stale ? <span className="tr-stat tr-stat--warn" data-tip="原文在翻译后被修改过 — 由 Agent 重译刷新"><b>{stale}</b> 已过期</span> : null}
         </div>
         {done === sentences.length ? (

@@ -71,3 +71,10 @@ count comes back as `missingTranslations` plus a `partial-translation` warning.
 text/JSON/MP4 exports insert the BCP-47 tag before the extension and preflight every
 output before writing any of them. MP4 uses the same resolved subtitle render plan as
 BaoCut's preview, so do not replace it with browser screenshots or native text overlays.
+
+MP4/M4V source video may be SDR H.264 or platform-decodable SDR HEVC (H.265); both
+are decoded before subtitle composition and exported as H.264. The quality tier changes
+only the output bitrate, not source-codec compatibility. HDR input still needs conversion
+to SDR before export. On macOS, BaoCut automatically handles the less-compatible `hev1`
+sample entry written by some OBS versions through a temporary copy; it never modifies the
+source file.

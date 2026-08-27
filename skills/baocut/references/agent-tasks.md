@@ -7,16 +7,20 @@ process alive and answer through its leased task queue.
 
 Most of this document is about staffing wide parallel batches. A short clip
 (under ~15 minutes; a transcript that fits one 2200-source-word page) never has
-one: every stage dispatches exactly one call, serially, and the observed chain
-for a 100-second clip was `analysis` → `polish` → `translate-brief` →
-`translate` → `align-edges` → `align-rewrite` (one over-hard chunk) → one
-closing `align-edges` repair from `auto`'s refine pass — seven calls, about
-nine minutes of answering. For that shape:
+one: every stage dispatches exactly one call, serially, and the fast chain is
+`analysis` → `polish` → `translate-brief` → `translate` → `align-edges`, plus
+`align-rewrite` only when a chunk is over hard. Closing refinement is offered
+after completion and is not part of the default run. For that shape:
 
-1. Start `auto … --llm agent --jsonl` in the background, writing to a log
-   file, and put one `Monitor`/tail on it that wakes on `batch-dispatch`,
-   `error`, and `done`. Do not launch worker subagents and do not create a
-   task tracker for the pipeline steps.
+1. Export `BCUT_LLM_MAX_WORKERS=1`, then start `auto … --llm agent --jsonl`
+   in the background, writing to a log file, and put one `Monitor`/tail on
+   it whose filter is exactly `"event":"(batch-dispatch|error|done)"` — not
+   a stage name: `transcribe` emits one `artifact` line per recognized
+   segment and would flood the monitor. The worker cap is what keeps polish
+   on one page: without it the engine sees three idle slots and re-pages a
+   short transcript into three pages plus a `seam-repair` call, each of
+   which then queues behind the one you are answering. Do not launch worker
+   subagents and do not create a task tracker for the pipeline steps.
 2. On the first dispatch, claim in the orchestrating session with a unique
    `--worker` id and no `--kinds` filter:
    `task claim <project> --worker <id> --timeout 60 --json`.
@@ -83,8 +87,8 @@ turns):
 - Cover every kind the engines can dispatch, not just the common ones. The full
   set is `analysis`, `speaker-repair`, `polish`, `polish-retry`, `punct-repair`,
   `seam-repair`, `segment-repair`, `segment`, `segment-index`, `chapters`,
-  `chapters-outline`, `translate-brief`, `translate`, `align`, `cleanup`,
-  `broll`. `speaker-repair` (dispatched **before** the polish pages on
+  `chapters-outline`, `translate-brief`, `translate`, `align`, `align-edges`,
+  `align-rewrite`, `cleanup`, `broll`. `speaker-repair` (dispatched **before** the polish pages on
   multi-speaker projects, to let the model reassign diarization fragments —
   a particle or a few words that grammatically continue the neighbouring
   speaker's sentence — before ⏹ becomes a hard sentence/paragraph boundary;
@@ -112,9 +116,13 @@ turns):
   unavailable, run one loop and report that limitation instead of pretending
   the queue was parallel.
 - Size the worker pool from the actual page plan, not from a fixed number.
-  Agent-mode translate pages use 2000 source words (+10% slack, balanced
-  boundaries), so a document of W source words dispatches about
-  `ceil(W / 2200)` translate calls. Align starts with that count, then also
+  Agent-mode translate pages default to `--align-fusion rows`, which pages at
+  800 source words (+10% slack, balanced boundaries), so a document of W
+  source words dispatches about `ceil(W / 880)` translate calls — because rows
+  costs more per source word than a plain translation and long pages make the
+  model abandon row spans partway through. Passing `--align-fusion on` or
+  `off` falls back to 2000-word pages (`ceil(W / 2200)`). Align starts with
+  that count, then also
   enforces at most 40 items per page and a 16000-unit deterministic complexity
   budget; many short/high-constraint sentences can therefore produce more
   align pages than the word formula. Polish pages are ~2200 core words. Use
@@ -129,9 +137,10 @@ turns):
   to `ceil(pendingCount / 2)` (max 16) once the median passes 90 s — but an
   explicit value pins the ceiling and disables that adaptation, so only export
   it when you really cannot run more sessions. Do not carry a habitual "6 workers" over from
-  older runs: with the 2000-word pages most talks under 20 minutes never have
+  older runs: with the default 800-word rows pages (or 2200-word pages under
+  `--align-fusion on|off`) most talks under 20 minutes never have
   6 pending calls at once. Provider mode (`--llm provider:<vendor>/<model>`)
-  runs the same 2000-word pages on the CLI's own lanes and needs no workers
+  runs the same page sizes on the CLI's own lanes and needs no workers
   at all.
 - Give every worker process a unique `--worker` id. One process should reuse
   its own id serially for the whole flow, but two concurrent processes must
@@ -145,7 +154,9 @@ turns):
   the list (`--kinds "translate,align"`) so the shell does not split it into an
   array. A malformed filter is rejected as `invalid_arg` rather than returning
   `{"status":"empty",…}`, so an `empty` claim always means the queue really
-  had no matching call.
+  had no matching call. Repeat the same filter on every filtered worker's
+  `task submit --next --kinds …`; claim filters are not implicit process state,
+  and omitting it lets a translate worker lease a high-reasoning align call.
 - Chain, then exit — do not idle. A worker submits with `--next` (or claims
   again with a bounded timeout), so the same session carries straight from its
   page into the batch's global repair call and a following `refine-align`
@@ -277,20 +288,15 @@ turns):
      --kinds align --json
    ```
 
-   Stage boundaries need no advance staffing. The align batch dispatches
-   seconds after the last translate submit, and a worker that submits its
-   translate page with `--next` claims straight into it (`--next` holds the
-   claim open for up to 20 s, which covers the engine's checkpoint and
-   next-page write even on a debug build) — brief the workers on
-   both contracts up front and let them claim `--kinds translate,align`, and
-   the boundary closes inside the sessions already running. Chaining with
-   `--next` is what makes this work: workers that submitted and exited without
-   a chain once left the align batch waiting 212s for fresh sessions. Never
-   widen
-   `--kinds` without the briefing: that is the case the filter exists to
-   prevent, where a still-spinning worker grabs the next stage's call holding
-   only the previous stage's contract. Workers that already exited on an empty
-   queue are simply started again against the new batch.
+   Stage boundaries need no advance staffing. A mid-tier translate worker must
+   submit with `--next --kinds translate`; it must not cross into a high-tier
+   align call. On the first align dispatch, start the high-tier pool with
+   `--kinds align,align-edges,align-rewrite` and repeat that exact filter on
+   submit. Keep those sessions chained across align-edges → align-rewrite and,
+   only when the user preselected `auto --refine`, the closing refinement.
+   This preserves the expensive high-reasoning sessions without letting the
+   cheaper translation pool steal their work. Workers that exited on an empty
+   queue are started again only after a real matching dispatch appears.
 
    Translation pages are deliberately sized so large jobs can checkpoint and
    run in parallel. The root may handle a stubborn repair call after the queue
@@ -377,10 +383,11 @@ turns):
    bin/baocut task submit "/path/demo.bcut" \
      --task "<task>" --call "<call>" --lease-id "<leaseId>" \
      --worker codex-1 --file "/tmp/baocut-align-codex-1-c0001.html" \
-     --next --json
+     --next --kinds align,align-edges,align-rewrite --json
    ```
 
-   Pass the same `--worker` id you claimed with. Omitting it credits the lease
+   Pass the same `--worker` id and `--kinds` scope you claimed with. Omitting
+   the worker credits the lease
    holder and chains `--next` under that id, so it is safe; passing a *different*
    id is not — `--next` then claims on behalf of another worker and two workers
    end up fighting the one-worker-one-lease rule.
@@ -483,7 +490,9 @@ valid answer wins); only a lint-failing late submit reports `stale`.
   claim→submit time (queue wait does not count, and the last call left in
   flight is hedged at 1× the median instead of 2×): answer it
   normally — same contract, same payload shape, no penalty attached. The first
-  answer wins; the losing call is settled automatically, so the slower worker's
+  answer that passes the complete submit quality gate wins; rejected
+  translation or align-edges answers never settle the pair. The losing call is
+  settled automatically, so the slower worker's
   late submit reports `status: "already-answered"` — that is a success, not an
   error. Do not skip a call or change your answer because it is a hedge.
 - Answered calls survive producer restarts: if the pipeline dies and is rerun,
@@ -606,7 +615,7 @@ What each carrier expects, in one line each — the contract has the rest:
 
 | Kind | Carrier | Your answer |
 |---|---|---|
-| `translate` | `<article>` of `<section>`/`<p id="s-…">` (`text/html`) | The same document with each `<p>`'s text replaced by the translation. Every id present exactly once, unchanged, and every attribute kept — `data-rt` lists target terms that must appear in that sentence, `data-budget` its reading budget. When `data-align-words` (`[1]I [2]didn't …`, the source words with 1-based ordinals) is present, first write the natural translation, then wrap it inside the same `<p>` in `<span data-src="…">chunk</span>` chunks (see `align-edges` below for the micro-format); the spans are transparent — their texts concatenated are the translation — and a bad annotation is ignored but never excuses a bad translation. Sentences marked `data-editable="false"` are frozen: copy their existing `data-translation` back byte for byte. The read-only `<!-- context-before/after -->` comments are input only; never echo them. |
+| `translate` | `<article>` of `<section>`/`<p id="s-…">` (`text/html`) | The same document structure — keep the `<article>` wrapper and every `<section id>` — with each `<p>`'s text content replaced by the translation. Every id present exactly once, unchanged, and never moved to a different `<section>`. Every other attribute — `data-rt`, `data-budget`, `data-align-words`, `data-align-groups`, `data-align-needed`, `data-source-id`, `data-sid`, `data-translation` — is **input-only**: nothing reads it back from your answer, so leave it out. The ideal sentence element is just `<p id="s-g1.0">译文</p>` (keeping an attribute is tolerated, never an error, but always prefer to drop it). `data-rt` still binds you — its required target strings must appear verbatim in that sentence's translation — you just don't echo the attribute itself. When `data-align-words` (`[1]I [2]didn't …`, the source words with 1-based ordinals) is present, first write the natural translation, then wrap it inside the same `<p>` in `<span data-src="…">chunk</span>` chunks (see `align-edges` below for the micro-format); the spans are transparent — their texts concatenated are the translation — and a bad annotation is ignored but never excuses a bad translation. When that same `<p>` also carries `data-align-groups` (`1-4@0.0-1.4;5-9@1.4-3.2` — source ordinal ranges with per-group durations, seconds from the sentence start) — the default contract since `--align-fusion` defaults to `rows` — the spans are **display rows**, not semantic chunks: each `data-src` must be a single ascending ordinal range, consecutive rows must be adjacent and together cover `1..N` in source order, and a row is exactly one group or several adjacent groups joined (never cut inside a group) — join across a local reordering instead of reordering the rows themselves; every sentence that carried `data-align-groups` needs its rows, not just the first few. Sentences marked `data-editable="false"` are frozen: emit their existing `data-translation` text verbatim as that element's text content — you still drop the attributes themselves. The read-only `<!-- context-before/after -->` comments are input only; never echo them. When any sentence carries fusion attributes, the payload ends with one plain-text `Reminder: …` line after `</article>` restating the id-only / annotate-every-sentence rules — it is not part of the document, never echo it back. |
 | `speaker-repair` | One or more windows of a raw multi-speaker transcript, each between `<<<WINDOW k \| n lines \| speakers S1,S2 \| current: 1-13 S1, 14-14 S2, 15-31 S1>>>` and `<<<WINDOW-END>>>`, **one word (one CJK character) per line**, every line prefixed with its 1-based number (`12\| 的`) and followed by `⏸` pause marks where the source pauses; the header lists the speakers present in the window and the current attribution as line ranges (`text/plain`) | **Line-number ranges plus a label only, never the words.** For every window, in order: `<<<WINDOW k>>>`, then one `a-b LABEL` per line (one range = one turn), then `<<<WINDOW-END>>>`. Ranges start at 1, are contiguous and end at the window's last line; every label must be one of the header's `speakers`; after merging adjacent same-label ranges the number of turns must not exceed the number in `current:` — you may merge a fragment into its neighbours or move an existing speaker change by a few words, never invent a new speaker change. Decide by meaning and grammar first, then timing: reassign a fragment that obviously completes the neighbouring speaker's clause (a particle like 的/了/吗, the head or tail of a phrase) when the pause around it is tiny; keep short turns that are real utterances (acknowledgements 嗯/对/哦/yeah, questions, answers). The transcript is raw — punctuation may be missing or inconsistent, do not rely on it; when unsure, repeat the current attribution. Windows are accepted one by one: a missing window or a broken range list is `range-invalid` and comes back on the next round with the verdict in `problems[]`; the other windows in the same payload land regardless. A valid answer that relabels more than a fragment (over 12 words in the window, or a run over 8 words / 2.5 s) is silently ignored by the engine — only fragments and small boundary shifts are in scope. Nothing outside the fences. |
 | `polish` | Plain text between four sentinel fence lines (`text/plain`) | All four fence lines reproduced verbatim and once, both read-only regions character for character, edits only between `<<<EDIT-BEGIN>>>` and `<<<EDIT-END>>>`. A blank line is a paragraph break; a single newline means nothing, and `<<<HARD-CUT>>>` is not one. Page seam: if the first sentence of the editable region starts a new paragraph rather than continuing the last paragraph shown in `<<<CONTEXT-BEFORE …>>>`, put exactly one blank line right after `<<<EDIT-BEGIN>>>` before it; otherwise start the text directly (that leading blank line is the only one with meaning, and it means nothing on the first page). Seams you do not flag are settled later by a `seam-repair` call. Sentence boundaries come only from real sentence-ending punctuation: close each complete thought with `.?!` / `。？！` as you go, so that no mapped sentence covers more than 1200 source characters or 300 seconds and no corrected sentence exceeds 300 Latin words / 500 CJK characters. An over-long sentence does not fail submit lint — the page is accepted for its wording, but that sentence comes back to you as a `punct-repair` call, which is extra work you avoid by punctuating properly the first time; extra newlines, commas, or pause markers never substitute for real sentence-ending punctuation. Paragraphing is mandatory, not optional: keep every paragraph at or under the same cap — spoken-language paragraphs run 2–6 sentences, so an editable region of real length always contains several. An over-long paragraph does not fail submit lint; the page is accepted and that paragraph comes back to you later as a `segment-repair` call, which is extra work you avoid by segmenting properly the first time. Never copy the `⏸`/`⏹` markers into the answer (a `⏹` may carry the incoming speaker's label, as in `⏹S2` — the label is part of the marker, not a word), reinterpret UTF-8, or introduce control characters. |
 | `punct-repair` | One or more over-long sentences, each between its own `<<<SENTENCE-BEGIN id=sNN min-sentences=K>>>` / `<<<SENTENCE-END id=sNN>>>` pair, the text carrying `⏸`/`⏸⏸`/`⏸⏸⏸` pause hints projected from the source timeline (`text/plain`) | Every item reproduced with its fence lines and the same id — the only change allowed is adding sentence-ending punctuation (`.?!` / `。？！`) where a complete thought ends, at least `min-sentences` sentences per item. Do not fix typos, wording, or spacing, do not merge, split, add or drop words, do not copy the `⏸` hints, and do not create conflicting marks (`。，` `，。` `，，` `,,` `..` `.,`) or a false sentence end at a dangling connector. Items are independent and accepted one by one: a rewritten item is `source-drift`, an item returned without any new sentence end is `sentence-oversize`, and both come back on the next round with the verdict in `problems[]`; the other items in the same payload land regardless. Nothing outside the fences. |
@@ -637,6 +646,24 @@ contrastive / conditional / result relation to fit. A later stage can split a
 complete translation but cannot recover a clause you left out. Do not put ` | `
 or any other segmentation mark inside a `<p>` either — the file contract has no
 draft-cut channel, and the align stage decides the rows.
+
+**Annotate in `translate` and the big `align-edges` call disappears.** The
+`data-align-words` span channel on the translate page is not decoration:
+every sentence you annotate there is aligned at acceptance, and the first
+`align-edges` call afterwards carries only sentences the page offered no
+channel for — short ones whose translation still came out over fit (on a
+9-minute clip: 2 of 84) — plus any annotation the lint discarded. Writing
+the `<span data-src>` chunks while the
+translation is fresh in mind costs seconds per sentence; a separate
+align-edges page over the same sentences costs a whole call and a re-read of
+84 rows. Two details that cost a lint round when missed: chunk in
+**monotonic** source order wherever the target allows it, because two chunks
+whose ordinals cross are merged into one block and that block is where the
+cutter can no longer place a seam; and remember that the engine normalizes
+CJK/Latin spacing on acceptance (`到AI` becomes `到 AI`), so in any later
+align/repair table the `td.tgt` text already contains that space and your
+chunk texts must reproduce it byte for byte — put the space at the end of the
+chunk before the Latin token.
 
 **The align table is a table, not a JSON payload in HTML clothing.** Its only
 columns are the id `<th>`, `td.src`, and `td.tgt`; there is no `draftTarget`, no
@@ -698,7 +725,7 @@ recognizing on sight:
 | `source-drift` | A read-only region was edited (polish context regions, an align source cell, a `punct-repair` item whose words — anything other than punctuation — were changed, added or dropped), or a polish answer introduced an illegal control character (usually UTF-8 mojibake). Restore the named region; for mojibake, reopen the UTF-8 payload and reproduce the intended punctuation normally. |
 | `glossary-missing` | A locked target term is absent from a translation. Put the exact spelling back. |
 | `paragraph-move` | A sentence moved between paragraphs. |
-| `sentence-oversize` | A `punct-repair` item came back with no new sentence-ending punctuation (or the punctuation you added could not be mapped back onto the source words) — still one sentence over 1200 source characters / 300 seconds or the 300 Latin words / 500 CJK characters cap. Re-read that item and add `.?!` / `。？！` wherever a complete thought ends (the `⏸` hints mark long pauses, `min-sentences` is the minimum count); change nothing else. On a later round the request's `problems[]` names the item by its `sNN` id; a sentence you split that is still over the cap comes back the same way, so cut it into more pieces rather than fewer. |
+| `sentence-oversize` | A `punct-repair` item came back with no usable new sentence ending. The engine sends both hard-overflow sentences and punctuation-starved 80-character CJK semantic sentences through this targeted wave, so an unchanged Chinese polish page cannot silently leave long run-ons behind. Use the `⏸` hints and `min-sentences`, changing nothing except `.?!` / `。？！`; a later round names the remaining item in `problems[]`, and you should split it into more real sentences rather than fewer. |
 | `paragraph-oversize` | A `segment-repair` block came back as a single range while still over the per-language cap (300 Latin words / 500 CJK characters). Re-read that block and split it into at least the number of ranges the verdict names, breaking at every topic turn (2–6 sentences each). On a later round the request's `problems[]` names the block by its position in the payload (`第 k 块：…`); a block you split whose pieces are still far over the cap comes back the same way, so cut it into more pieces rather than fewer. |
 | `range-invalid` | A `segment-repair` / `seam-repair` block (or a `speaker-repair` window) is missing from the answer, or its range list does not start at 1, is not contiguous, does not reach the block's last line, or names lines outside the block; for `speaker-repair` also a label that is not one of the window's `speakers`, or more turns than `current:` lists. The verdict names the first defect (`第 k 行没有被任何区间覆盖`, `重叠`, `越界`, `段数不得增加`…). Answer every block with `<<<BLOCK k>>>` … `<<<BLOCK-END>>>` (`<<<WINDOW k>>>` … `<<<WINDOW-END>>>` for speaker-repair) and a range list that covers exactly lines 1..n once. |
 | `align-edge-ordinal` | An `align-edges`/`align-rewrite` chunk's `data-src` is unreadable, names an ordinal beyond the source word count, or reuses an ordinal already claimed by another chunk in that sentence. Fix that sentence's `data-src` lists (1-based, each ordinal at most once). |
@@ -760,6 +787,13 @@ spending another call:
   its source duration is short; only repair it when a safe neighboring merge or
   timing cut exists.
 
+Fast `auto` returns `data.refineOffer[]` instead of running this repair itself.
+In the completion summary, quote the offer's benefit and cost fields and ask
+whether the user wants the priority command now. This is a real decision gate:
+do not claim or dispatch refinement work until the user answers yes. If the run
+used explicit `auto --refine`, prior consent already exists and this offer is
+empty.
+
 For actionable non-hard advisories, apply pending Studio edits once, then
 re-align every named sentence in one command and pass all reasons together
 (`--instructions` reaches the align contract):
@@ -805,9 +839,10 @@ undersells the payload:
   it), or the 40-per-class caps deferred sentences. That extra round resends
   only those no-op/deferred sentences; a sentence whose source geometry did
   change is treated as stubborn and left in `remaining[]`, not used to drag
-  the whole residual set through another call. Auto's closing pass has no
-  extra round and no fresh align repair budget. Sentences still flagged after
-  that are reported in `remaining[]` for the root to judge, not re-queued.
+  the whole residual set through another call. An explicitly requested
+  `auto --refine` closing pass has no extra round and no fresh align repair
+  budget. Sentences still flagged after that are reported in `remaining[]` for
+  the root to judge, not re-queued.
 - If the goal is narrower — clear only the strict hard blockers and leave the
   other hotspots alone — do not reach for `refine-align --only-hard`. Name the
   sentences yourself with the same entry point refine-align uses internally:

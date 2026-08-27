@@ -584,6 +584,9 @@ function StagePane() {
             onMoveLine={moveLine}
             elements={elements}
             elementsKey={elementsKey}
+            timelineTracks={projectionTracks}
+            timelineDuration={doc.meta.duration || 0}
+            timelineProjection={projection}
             selectedElementId={selectedElementId}
             editingElementId={elementEditing && elementEditing.id}
             onElementSelect={selectElement}

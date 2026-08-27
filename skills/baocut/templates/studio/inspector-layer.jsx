@@ -35,12 +35,15 @@ const placeOf = (element) => (element && element.place) || {};
 const SIZE_MIN = 10;
 const SIZE_MAX = 96;
 
-// 层头部与提示里的称呼（与 element-ops.js elementLabel 同一套词）。
+// 层头部与提示里的称呼（与 element-ops.js elementLabel 同一套词：那边是真相，
+// 这里只多一个图标）。
+const KIND_ICONS = { text: 'text-lines', image: 'image' };
+
 function elementMeta(element) {
-  if (!element) return { icon: 'properties', title: '元素', label: '元素' };
-  if (element.role === 'watermark') return { icon: 'layers', title: '水印', label: '水印' };
-  if (element.kind === 'image') return { icon: 'image', title: '图片', label: '图片' };
-  return { icon: 'text-lines', title: '文本', label: '文本' };
+  const label = EOPS ? EOPS.elementLabel(element) : '元素';
+  if (!element) return { icon: 'properties', title: label, label };
+  if (element.role === 'watermark') return { icon: 'layers', title: label, label };
+  return { icon: KIND_ICONS[element.kind] || 'properties', title: label, label };
 }
 
 // ---------- 内容 ----------
@@ -103,12 +106,90 @@ function ElImageContent({ element }) {
   );
 }
 
-function ElContentSect({ element, first }) {
-  return (
-    <SpSect title="内容" first={first}>
-      {element.kind === 'image' ? <ElImageContent element={element} /> : <ElTextContent element={element} />}
-    </SpSect>
+// 模板贴纸（P7c）：两个旋钮，都不是颜色 —— 换哪份模板，以及动态贴纸播完怎么办。
+// `StickerProps` 没有 fill / stroke（§13 P7b-core 定案二），所以这里**没有色板**：
+// 给一个渲染器会忽略的控件，比不给更糟。
+//
+// `loop` 只对**动态**贴纸（资产是 alpha WebM）有意义，静态模板每帧都一样；文档里
+// 已经写了 loop 的元素照样回显，切换也照样写回 —— 那是用户的字段，不是我们的。
+function ElStickerContent({ element }) {
+  const app = useApp();
+  const props = (element.sticker && typeof element.sticker === 'object') ? element.sticker : {};
+  const source = EG.stickerSource(props) || 'template';
+  const templateId = props.templateId;
+  const recipe = EG.stickerRecipe(templateId);
+  const loop = EG.stickerLoop(props);
+  const write = (patch) => app.patchElement(element, { sticker: { ...props, ...patch } },
+    { label: '修改贴纸 ' + element.id });
+  const loopRow = (
+    <SpRow label="循环">
+      <Segmented size="S" value={loop} onChange={(value) => write({ loop: value })}
+        options={[
+          { value: 'loop', label: '循环' },
+          { value: 'once', label: '播一遍' },
+          { value: 'hold', label: '定格首帧' },
+        ]} />
+    </SpRow>
   );
+  if (source !== 'template') {
+    return (
+      <React.Fragment>
+        <div className="vk-sp__hint">导入的贴纸自带画面，换图请用上面的按钮。</div>
+        {loopRow}
+      </React.Fragment>
+    );
+  }
+  return (
+    <React.Fragment>
+      <div className="bcs-stk__current">
+        <window.StickerSwatch recipe={recipe} size={32} />
+        <span className="bcs-stk__currentname">
+          {recipe ? recipe.name : (templateId || '未选模板')}
+          {/* 文档可能引用这份构建没有的模板（CLI 或更新的版本写的）。如实说，
+              而不是悄悄把用户的贴纸改成别的一份。 */}
+          {recipe ? null : <span className="bcs-stk__currentsub">这份构建的模板库里没有它</span>}
+        </span>
+      </div>
+      <window.StickerGrid selected={templateId}
+        onPick={(id) => write({ source: 'template', templateId: id })} />
+      {loopRow}
+      <div className="vk-sp__hint">贴纸自带配色 —— 想换颜色就换一份模板。</div>
+    </React.Fragment>
+  );
+}
+
+// core 0.2 的其余新 kind（shape / visualizer / progress）在 studio 还没有属性面板
+// （设计 §10 的 P3 只给 gpui 与 Mac 排了这项）。这里如实说一句，而**不是**掉进
+// 文本分支给一个改不了任何东西的文本框 —— 那正是"不是 image 就当 text"的老毛病。
+function ElUnsupportedContent({ element }) {
+  const detail = element.kind === 'shape' && element.shape ? '（' + element.shape.shape + '）' : '';
+  const label = EOPS ? EOPS.elementLabel(element) : '元素';
+  return (
+    <div className="vk-sp__hint">
+      {label + detail}的样式属性还没有面板，请在 Mac App 里编辑；这里可以改时间、位置与变换。
+    </div>
+  );
+}
+
+function ElContentSect({ element, first }) {
+  // 显式分派 + 明确兜底，与 elements-stage.jsx 的 buildElement 同一条纪律。
+  const content = (() => {
+    if (element.kind === 'text') return <ElTextContent element={element} />;
+    // 资产贴纸就是一张图，换图那套直接可用 —— 再补上贴纸自己的两个旋钮。
+    if (element.kind === 'sticker' && element.srcId) {
+      return (
+        <React.Fragment>
+          <ElImageContent element={element} />
+          <ElStickerContent element={element} />
+        </React.Fragment>
+      );
+    }
+    if (element.kind === 'image') return <ElImageContent element={element} />;
+    // 模板贴纸没有 srcId：模板网格 + 循环（P7c）。
+    if (element.kind === 'sticker') return <ElStickerContent element={element} />;
+    return <ElUnsupportedContent element={element} />;
+  })();
+  return <SpSect title="内容" first={first}>{content}</SpSect>;
 }
 
 // ---------- 时间 ----------
@@ -225,31 +306,38 @@ function ElTimingSect({ element, duration, patch }) {
 function ElTransformSect({ element, patch }) {
   const place = placeOf(element);
   const isImage = element.kind === 'image';
+  const isText = element.kind === 'text';
+  // 圆角与填充方式只对真正走媒体路径的元素有意义（资产贴纸也走那条路）；
+  // 垂直锚点只对文本有意义。新 kind 两者都不给，而不是默认落进文本那一支。
+  const isMedia = isImage || (element.kind === 'sticker' && !!element.srcId);
   const geom = (next) => patch({ place: next }, '改元素几何');
-  const widthDefault = isImage ? DEF.imageWidthPct : Math.round((DEF.textWidthRatio || 0.9) * 100);
+  const widthDefault = isText
+    ? Math.round((DEF.textWidthRatio || 0.9) * 100)
+    : (isImage ? DEF.imageWidthPct : (EG ? EG.DEFAULT_ELEMENT_W : 20));
   return (
     <SpSect title="变换">
-      <SpSlider label={isImage ? '宽度' : '折行宽度'} value={num(place.w, widthDefault)} min={4} max={100}
+      <SpSlider label={isText ? '折行宽度' : '宽度'} value={num(place.w, widthDefault)} min={4} max={100}
         onChange={(v) => geom({ w: v })} fmtV={(v) => v + '%'}
-        hint={isImage ? '占画面宽度的百分比，高度按图片自身比例' : '文字超过这个宽度就折行'} />
+        hint={isText ? '文字超过这个宽度就折行' : '占画面宽度的百分比，高度按元素自身比例'} />
       <SpSlider label="缩放" value={num(place.scale, DEF.scale == null ? 1 : DEF.scale)} min={0.1} max={4} step={0.05}
         onChange={(v) => geom({ scale: v })} fmtV={(v) => v.toFixed(2) + '×'} />
       <SpSlider label="旋转" value={num(place.rot, 0)} min={-180} max={180}
         onChange={(v) => geom({ rot: v })} fmtV={(v) => v + '°'} />
       <SpSlider label="不透明度" value={Math.round(num(place.opacity, 1) * 100)} min={0} max={100} step={5}
         onChange={(v) => geom({ opacity: v / 100 })} fmtV={(v) => v + '%'} />
-      {isImage ? (
+      {isMedia ? (
         <SpSlider label="圆角" value={num(place.radius, 0)} min={0} max={80}
           onChange={(v) => geom({ radius: v })}
           hint="以短边 540 为参考单位换算，与烧录端同一口径" />
       ) : null}
-      {isImage ? (
+      {isMedia ? (
         <SpRow label="填充" fill>
           <Segmented stretch size="S" value={element.fit === 'contain' ? 'contain' : 'cover'}
             onChange={(v) => patch({ fit: v }, '改元素填充')}
             options={[{ value: 'cover', label: '裁切填满' }, { value: 'contain', label: '完整放入' }]} />
         </SpRow>
-      ) : (
+      ) : null}
+      {isText ? (
         <React.Fragment>
           <SpRow label="垂直锚点" fill>
             <Segmented stretch size="S"
@@ -259,7 +347,7 @@ function ElTransformSect({ element, patch }) {
           </SpRow>
           <div className="vk-sp__hint">垂直位置钉住文字块的这条边，折行时往另一边生长。</div>
         </React.Fragment>
-      )}
+      ) : null}
     </SpSect>
   );
 }

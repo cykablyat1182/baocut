@@ -248,6 +248,57 @@
   const subtitles = (doc, options) =>
     render(doc, subtitleEvents(doc, options), (options || {}).format || 'srt', options);
 
+  // ---------- 视频导出观测：ETA / 编码速率 / 渲染方式 ----------
+  // GET __bcut/export/video/status 的 running 态在 done/total 之外可能平铺
+  // elapsedMs/fps/etaMs（近窗编码速率与外推剩余时间，见
+  // docs/bcut-cli-server-reference.md 观测字段）。三键"缺席 = 未知"，不是 0：
+  //   - 服务端从没发过这组观测（旧服务端 / serve 重启后续上的 job）→ elapsedMs
+  //     也缺席，这里返回 null，调用方不渲染这一行；
+  //   - 发了 elapsedMs 但还在预热窗口（开头 3 秒或前 1% 进度、fps 滑窗不足
+  //     750ms）→ fps/etaMs 缺席，显示"正在预估…"；
+  //   - 三者齐全 → "剩余约 N 分钟 · N fps"，不足 1 分钟时改显示秒数。
+  function progressEtaText(running) {
+    const s = running || {};
+    const hasFps = Number.isFinite(s.fps) && s.fps > 0;
+    const hasEta = Number.isFinite(s.etaMs);
+    if (!hasFps && !hasEta) {
+      if (s.elapsedMs == null) return null;
+      return '正在预估…';
+    }
+    const fpsText = hasFps ? Math.round(s.fps) + ' fps' : null;
+    if (!hasEta) return fpsText ? '正在预估… · ' + fpsText : '正在预估…';
+    const totalSeconds = Math.max(0, Math.round(s.etaMs / 1000));
+    const etaText = totalSeconds < 60
+      ? '剩余约 ' + Math.max(1, totalSeconds) + ' 秒'
+      : '剩余约 ' + Math.round(totalSeconds / 60) + ' 分钟';
+    return fpsText ? etaText + ' · ' + fpsText : etaText;
+  }
+
+  // done 态的 result（同一 status 响应，见 docs 观测字段表）：renderMode 是
+  // "full" | "patch"，patch 态下 patchedRanges 是实际生效的补丁窗数。
+  function renderModeText(result) {
+    const r = result || {};
+    if (r.renderMode === 'patch') {
+      return Number.isFinite(r.patchedRanges)
+        ? '光速修正：仅重渲 ' + r.patchedRanges + ' 处' : '光速修正';
+    }
+    if (r.renderMode === 'full') return '整片重渲';
+    return null;
+  }
+
+  // fallbackReason 的稳定取值（docs 同表）：请求了区间重渲却降级为整片重渲的
+  // 结构化理由，供导出完成提示展示"这次为何是全量"。
+  const FALLBACK_REASON_TEXT = {
+    baselineMissing: '基线文件不存在',
+    emptyRanges: '光速修正窗口为空',
+    baseDocumentMismatch: '基线与当前文档不匹配',
+    patchUnavailable: '当前环境不支持区间重渲',
+  };
+
+  function fallbackReasonText(reason) {
+    return reason ? (FALLBACK_REASON_TEXT[reason] || '光速修正未生效，已整片重渲') : null;
+  }
+
   return {
     clockTime, srtTime, vttTime,
     slug, languageCode, languageTag, filename, videoFilename,
@@ -255,5 +306,6 @@
     joinTexts, paragraphTranslations, markdown, wordCount,
     subtitleEvents, missingTranslations, render, subtitles,
     sourceLanguage, targetLanguage,
+    progressEtaText, renderModeText, fallbackReasonText,
   };
 }));

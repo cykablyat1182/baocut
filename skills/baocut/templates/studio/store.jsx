@@ -32,7 +32,10 @@ const TRANSCRIPT_APPLY_URL = '__bcut/transcript/apply';
 const TIMELINE_APPLY_URL = '__bcut/timeline/apply';
 const UNDO_URL = '__bcut/undo';
 const REDO_URL = '__bcut/redo';
-const LS_TIME = 'bcs:playhead';     // 播放头是观看状态而非编辑，留在 localStorage
+const LEGACY_LS_TIME = 'bcs:playhead';
+// 播放头是观看状态而非编辑，按 serve 的项目路由隔离在 localStorage；根挂载
+// 兼容读取旧全局键，避免升级后丢掉当前单项目的进度。
+const LS_TIME = TR.playbackStorageKey(window.location.pathname);
 // v0.3：trans 通道键分两形——"s-…#N" = 对齐片（piece）文本编辑；"s-…" =
 // 整句译文改写（sentence，改写后该句降级整句上屏、待 Agent 重切）。
 const EMPTY_OV = {
@@ -362,7 +365,8 @@ function AppStore({ children }) {
   const [err, setErr] = useState(null);
   // rate = 走带倍速（与 clip 自身的 rate 相乘），fullscreen = 舞台全屏（stage.jsx 驱动）。
   const [player, setPlayer] = useState(() => ({
-    t: lsGet(LS_TIME, 0), playing: false, showSubs: true, vol: 0.8, muted: false, ratio: 'Original',
+    t: lsGet(LS_TIME, LS_TIME === TR.playbackStorageKey('/') ? lsGet(LEGACY_LS_TIME, 0) : 0),
+    playing: false, showSubs: true, vol: 0.8, muted: false, ratio: 'Original',
     rate: 1, fullscreen: false,
   }));
   const [sel, setSelState] = useState(null);
@@ -1022,7 +1026,16 @@ function AppStore({ children }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [player.playing]);
-  useEffect(() => { const iv = setInterval(() => lsSet(LS_TIME, playerRef.current.t), 800); return () => clearInterval(iv); }, []);
+  useEffect(() => {
+    const savePlayhead = () => lsSet(LS_TIME, playerRef.current.t);
+    const iv = setInterval(savePlayhead, 800);
+    window.addEventListener('pagehide', savePlayhead);
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener('pagehide', savePlayhead);
+      savePlayhead();
+    };
+  }, []);
 
   const seek = useCallback((t) => {
     const duration = (docRef.current && docRef.current.meta.duration) || 0;

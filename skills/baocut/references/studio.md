@@ -56,6 +56,10 @@ curl -fsS -X POST "${URL}__bcut/mount" -d '{"id":"<name>","path":"<abs project p
   `find` via `--expect`. Do not open the page merely to search or type text.
 - Page edits live in a project overlay and are written back with
   `studio apply`.
+- A newly transcribed project may show an "Initial grouping" badge. Those
+  paragraph boundaries are a provisional Studio projection, not a second
+  transcript truth; any paragraph edit promotes the same boundaries atomically
+  before applying the edit, and one undo reverts both actions.
 - Styles are a display projection. The comma/period option also applies to
   SRT/VTT and MP4 for every language, but never rewrites the transcript,
   JSON, or Markdown exports. By default the preview and subtitle exports hide

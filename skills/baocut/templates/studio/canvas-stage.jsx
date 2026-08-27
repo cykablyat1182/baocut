@@ -483,6 +483,13 @@ function KonvaPreview({
   // 叠加元素（文本 / 图片 / 水印）：几何与绘制在 elements-stage.jsx，这里只接线。
   elements,
   elementsKey,
+  // wasm overlay 的输入：**整份** timeline 投影轨道 + 整片时长（不是 `elements`
+  // 那份「此刻可见」的投影 —— wasm 自己按 `[start, end)` 挑活跃元素）。
+  timelineTracks,
+  timelineDuration,
+  // visualizer 的采样时刻折算表（`doc.timelineProjection`）。剪切过的项目里
+  // 不喂它，波形画的是「几秒前的声音」（设计 §13 P6b「投影补接」）。
+  timelineProjection,
   selectedElementId,
   editingElementId,
   onElementSelect,
@@ -499,6 +506,7 @@ function KonvaPreview({
   const editSuppressedUntilRef = useRef(0);
   const [fontReady, setFontReady] = useState(false);
   const elementsRef = useRef(null);
+  const overlayRef = useRef(null);
   const [elementRepaint, setElementRepaint] = useState(0);
   actionRef.current = {
     onCanvasPress, onSelectLine, onEditLine, onMoveBy, onMoveLine,
@@ -530,10 +538,29 @@ function KonvaPreview({
     stage.add(mediaLayer);
     stage.add(overlayLayer);
     stage.add(elementLayer);
+    // wasm overlay 的画布插在字幕层之上、元素层之下（判据写在 wasm-overlay.jsx
+    // 的文件头）：它出的是 shape / visualizer / progress 的真像素，而**所有** kind
+    // 的命中盒与选中框都在 elementLayer 上，框必须压在像素之上。Konva 的层画布
+    // 都是 position:absolute 的兄弟节点，DOM 顺序即绘制顺序。
+    const overlay = window.BCSWasmOverlay
+      ? window.BCSWasmOverlay.createOverlay({
+        onChange: () => setElementRepaint((value) => value + 1),
+      })
+      : null;
+    if (overlay) {
+      const anchor = elementLayer.getNativeCanvasElement
+        ? elementLayer.getNativeCanvasElement()
+        : elementLayer.getCanvas()._canvas;
+      anchor.parentNode.insertBefore(overlay.canvas, anchor);
+      overlay.resize(width, height);
+    }
+    overlayRef.current = overlay;
     const animation = new K.Animation(() => {}, mediaLayer);
     sceneRef.current = { stage, mediaLayer, overlayLayer, elementLayer, animation };
     return () => {
       animation.stop();
+      if (overlay) overlay.destroy();
+      overlayRef.current = null;
       stage.destroy();
       sceneRef.current = null;
     };
@@ -543,6 +570,7 @@ function KonvaPreview({
     const scene = sceneRef.current;
     if (!scene) return;
     scene.stage.size({ width, height });
+    if (overlayRef.current) overlayRef.current.resize(width, height);
     scene.stage.batchDraw();
   }, [width, height]);
 
@@ -958,6 +986,16 @@ function KonvaPreview({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
+    // wasm overlay 先同步：它返回「这一轮谁归 wasm 出像素」，Konva 那边据此只给
+    // 这些元素建命中盒。两者必须在同一个 effect 里定，否则会出现一帧的"两边都
+    // 画"或"两边都不画"。overlay 没起来时 rendered 是空集 —— 分派表整体退回 P0。
+    const sync = overlayRef.current
+      ? overlayRef.current.sync({
+        tracks: timelineTracks || [],
+        duration: timelineDuration,
+        projection: timelineProjection || null,
+      })
+      : null;
     // 回调一律经 actionRef 取当前值：层不因为父组件换了闭包就重建。
     elementsRef.current = window.BCSElements.renderElements({
       layer: scene.elementLayer,
@@ -965,6 +1003,8 @@ function KonvaPreview({
       elements: elements || [],
       width,
       height,
+      wasmIds: sync && sync.active ? sync.rendered : null,
+      wasmAspects: sync && sync.active ? sync.aspects : null,
       selectedId: selectedElementId,
       editingId: editingElementId,
       playing,
@@ -980,7 +1020,19 @@ function KonvaPreview({
         onImageReady: () => setElementRepaint((value) => value + 1),
       },
     });
-  }, [elementsKey, width, height, selectedElementId, editingElementId, playing, elementRepaint]);
+    // 元素表刚变过：立刻补一帧 wasm overlay，别等下一次播放头变化。
+    if (overlayRef.current) overlayRef.current.render(t);
+  }, [
+    elementsKey, width, height, selectedElementId, editingElementId, playing, elementRepaint,
+    timelineTracks, timelineDuration, timelineProjection,
+  ]);
+
+  // wasm overlay 的出帧：播放头变化 / seek 各一帧，rAF 对齐（节流在控制器里）。
+  // 与字幕的入场姿态同一条纪律 —— 画面是播放头的纯函数，播放与 seek 因此画出
+  // 同一帧。
+  useEffect(() => {
+    if (overlayRef.current) overlayRef.current.render(t);
+  }, [t]);
 
   // 行级选中变化不重建节点：sel.line 只改拖拽目标与包围框，双击窗口因此不会被
   // 第一次点击打断。

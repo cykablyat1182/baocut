@@ -126,6 +126,7 @@ function TranscribingPane() {
   const { doc } = app;
   const liveSegments = Array.isArray(doc.status.liveSegments) ? doc.status.liveSegments : [];
   const rows = liveSegments.length ? liveSegments : doc.cues;
+  const waitingForModel = doc.status.resourceWait === 'model-store';
   const scrollRef = useRef(null);
   useEffect(() => {
     const el = scrollRef.current;
@@ -133,9 +134,14 @@ function TranscribingPane() {
   }, [rows.length]);
   return (
     <div className="vk-transcript" data-screen-label="Transcribing">
-      <LiveHeader status={doc.status} title={'转录中 · ' + (doc.meta.model || '')} />
+      <LiveHeader status={doc.status} title={(waitingForModel ? '等待本地模型 · ' : '转录中 · ') + (doc.meta.model || '')} />
       <div className="vk-transcript__scroll" ref={scrollRef}>
-        {rows.map((c) => (
+        {waitingForModel ? (
+          <div className="vk-notice" role="status" style={{ margin: 12 }}>
+            <Ic name="clock" size={15} />
+            <span className="vk-notice__text">另一个任务正在更新本地模型。模型目录可用后会自动继续转录。</span>
+          </div>
+        ) : rows.map((c) => (
           <div key={c.id || (c.start + '|' + c.text)} className="tg tg--preview" onClick={() => app.seekSource('main', c.start)}>
             <span className="tg__time vk-mono">{fmt(c.start)}</span>
             <span className="tg-preview__col">
@@ -143,10 +149,10 @@ function TranscribingPane() {
             </span>
           </div>
         ))}
-        <div className="tg tg--preview">
+        {!waitingForModel ? <div className="tg tg--preview">
           <span className="tg__time vk-mono">--:--</span>
           <span className="tg-preview__col"><span className="tg-preview__txt tg-preview__txt--pending">识别中…</span></span>
-        </div>
+        </div> : null}
         <div style={{ height: 40 }}></div>
       </div>
     </div>

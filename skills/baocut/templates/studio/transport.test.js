@@ -8,6 +8,13 @@ const cues = [
   { id: 'c', start: 12.5, end: 15 },
 ];
 
+test('playbackStorageKey 按项目隔离播放进度，根挂载保持稳定作用域', () => {
+  assert.equal(TR.playbackStorageKey('/projects/alpha/'), 'bcs:playhead:alpha');
+  assert.equal(TR.playbackStorageKey('/projects/beta/style'), 'bcs:playhead:beta');
+  assert.equal(TR.playbackStorageKey('/subtitle'), 'bcs:playhead:root');
+  assert.equal(TR.playbackStorageKey(undefined), 'bcs:playhead:root');
+});
+
 test('normalizeRate 落到最近档位，非法值回 1×', () => {
   assert.equal(TR.normalizeRate(1.5), 1.5);
   assert.equal(TR.normalizeRate(1.3), 1.25);

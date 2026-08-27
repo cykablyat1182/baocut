@@ -43,6 +43,11 @@
   const WATERMARK_TEXT = '@你的名字';
   const TEXT_SECONDS = 10;
   const IMAGE_SECONDS = 4;
+  // 贴纸窗口与图片同长（4 秒）：它也是一件"贴上去看一眼"的装饰，不是一段内容。
+  const STICKER_SECONDS = 4;
+  // 贴纸缺省摆放：画面中偏上、宽 20%（core 的元素盒统一缺省 DEFAULT_ELEMENT_W）。
+  // 不落在正中：那里通常是人脸或主体，落上去第一件事就是拖开。
+  const STICKER_PLACE = Object.freeze({ x: 60, y: 40, w: 20 });
   // 图片水印的缺省摆放：与文本水印同一个角落（右上、透明度 0.6），宽度只给 12%
   // —— 一个 logo 铺到 34% 就成了画面主体。全片显示，所以不带 start/end。
   const WATERMARK_IMAGE_PLACE = Object.freeze({ x: 85, y: 10, w: 12, opacity: 0.6 });
@@ -117,6 +122,24 @@
     ];
   }
 
+  // 模板贴纸：一条 addElement 就够 —— 模板库随构建走，没有 source 要注册。
+  // `source` 是 0.2 契约拼写（StickerProps.source）；`loop` **不写**：静态模板画的
+  // 每一帧都一样，它只对动态（alpha WebM 资产）贴纸有意义，写进去只是一个恒等于
+  // 缺省的字段。资产贴纸（含动态）走 `bcut sticker` 转码 + putSource，是另一条流程。
+  function addStickerElement(options) {
+    const span = window_(options.time, options.duration, STICKER_SECONDS);
+    return {
+      kind: 'addElement',
+      element: {
+        kind: 'sticker',
+        sticker: { source: 'template', templateId: options.templateId },
+        start: span.start,
+        end: span.end,
+        place: { ...STICKER_PLACE },
+      },
+    };
+  }
+
   // 换图：注册一个**新** source 再改 srcId，而不是覆盖原 source —— 同一个 source 可能
   // 还被别的元素引用，覆盖它会把那些元素一起换掉。旧 source 留在文档里（无引用），
   // 撤销一步即回到原图。
@@ -185,17 +208,28 @@
     return { kind: 'removeElement', elId: typeof element === 'string' ? element : element.id };
   }
 
-  // 元素在提示与 aria 里的称呼。
+  // 元素在提示与 aria 里的称呼。core 0.2 的四个新 kind 各有自己的名字 —— 落进
+  // 兜底的"元素"会让撤销提示变成"撤销 改元素几何"这种看不出改了什么的话。
+  const KIND_LABELS = Object.freeze({
+    text: '文本',
+    image: '图片',
+    shape: '形状',
+    sticker: '贴纸',
+    visualizer: '波形',
+    progress: '进度条',
+  });
+
   function elementLabel(element) {
     if (!element) return '元素';
     if (element.role === 'watermark') return '水印';
-    if (element.kind === 'image') return '图片';
-    if (element.kind === 'text') return '文本';
-    return '元素';
+    return KIND_LABELS[element.kind] || '元素';
   }
 
   return {
     IMAGE_SECONDS,
+    KIND_LABELS,
+    STICKER_PLACE,
+    STICKER_SECONDS,
     TEXT_PLACEHOLDER,
     TEXT_SECONDS,
     TEXT_STYLE,
@@ -203,6 +237,7 @@
     WATERMARK_STYLE,
     WATERMARK_TEXT,
     addImageElement,
+    addStickerElement,
     addTextElement,
     addWatermark,
     basePlace,

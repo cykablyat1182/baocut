@@ -220,9 +220,9 @@
   // A merged run may therefore SPAN a source cue boundary — a deliberate display
   // compromise: no data changes, the piece still owns exactly the same words,
   // the panel just stops showing hairline-separated stubs.
-  // `OrigLineView.mergeShortRuns` (apps/mac) and `translate-model.js`
-  // (designs/baocut-mac) carry the mirrored implementation; the three must stay
-  // rule-for-rule identical.
+  // The canonical rule lives in flow-core
+  // `engines::align::merge_short_runs`; Mac and the BaoCut prototype carry the
+  // other presentation mirrors. Shared vectors keep all four identical.
   function mergeShortRuns(runs, minWords = 3) {
     if (!Array.isArray(runs) || runs.length < 2) return Array.isArray(runs) ? runs : [];
     const out = runs.slice();
@@ -243,6 +243,82 @@
       i = keep;   // the merged run may still be short — cascade
     }
     return out;
+  }
+
+  function sourceRowCount(wordIds, cueIndex) {
+    const runs = [];
+    let runCue = null;
+    (wordIds || []).forEach((rawId) => {
+      const id = rawId == null ? null : String(rawId);
+      const cueId = id !== null && cueIndex.has(id) ? cueIndex.get(id) : null;
+      const last = runs[runs.length - 1];
+      if (!last) {
+        runs.push({ cueId, words: [{ id }] });
+        runCue = cueId;
+      } else if (cueId === null || cueId === runCue) {
+        last.words.push({ id });
+      } else {
+        runs.push({ cueId, words: [{ id }] });
+        runCue = cueId;
+      }
+    });
+    return mergeShortRuns(runs).length;
+  }
+
+  // flow-core `ROW_DEFICIT_DWELL_SECONDS` / `ROW_DEFICIT_SENTENCE_SOURCE_ROWS`.
+  // JS cannot import the Rust consts, so the mirror names them once here instead
+  // of inlining the numbers at the comparison sites.
+  const ROW_DEFICIT_DWELL_SECONDS = 5;
+  const ROW_DEFICIT_SENTENCE_SOURCE_ROWS = 3;
+
+  // Read-only mirror of flow-core `row_deficit_stats`. The Studio has no AI
+  // job endpoint for this repair, so it exposes the count only and never writes
+  // a diagnosis into edits.json or data.json.
+  //
+  // The exclusion is the `align-stale` degradation set — `aligned === false`,
+  // i.e. the sentence has a `TransCue.fallback` and went up as one un-splittable
+  // row — so F4 is reported once, by `align-stale`. It is NOT `stale`
+  // (translation-stale = the source text changed after translating): that is a
+  // different set, and those sentences still take part in this rule.
+  function rowDeficitStats(doc) {
+    const d = doc || {};
+    const cueIndex = sourceCueIndex(d.cues || []);
+    // One pass to index the translation cues by sentence: filtering the whole
+    // transCues array inside the sentence loop is O(sentences × transCues),
+    // which a 7-hour transcript feels.
+    const piecesBySid = new Map();
+    (d.transCues || []).forEach((piece) => {
+      if (!piece || piece.sid == null) return;
+      const sid = String(piece.sid);
+      if (!piecesBySid.has(sid)) piecesBySid.set(sid, []);
+      piecesBySid.get(sid).push(piece);
+    });
+    const output = [];
+    (d.sentences || []).forEach((sentence) => {
+      if (!String(sentence && sentence.trans || '').trim()
+          || sentence.aligned === false || sentence.mode === 'independent') return;
+      const sourceRows = sourceRowCount(sentence.sourceWordIds || [], cueIndex);
+      const pieces = piecesBySid.get(String(sentence.id)) || [];
+      if (sourceRows < 2 || pieces.length >= sourceRows) return;
+      let maxDwellSec = 0;
+      let dwellDeficit = false;
+      pieces.forEach((piece) => {
+        const dwell = Math.max(0, finite(piece.end, 0) - finite(piece.start, 0));
+        maxDwellSec = Math.max(maxDwellSec, dwell);
+        const ids = Array.isArray(piece.sourceWordIds) && piece.sourceWordIds.length
+          ? piece.sourceWordIds : sentence.sourceWordIds;
+        const coveredRows = sourceRowCount(ids || [], cueIndex);
+        if (dwell >= ROW_DEFICIT_DWELL_SECONDS && coveredRows >= 2) dwellDeficit = true;
+      });
+      const sentenceLevel = sentence.correspondence === 'sentence'
+        || (sentence.correspondence == null && sentence.crossing === true);
+      if (!dwellDeficit
+          && !(sentenceLevel && sourceRows >= ROW_DEFICIT_SENTENCE_SOURCE_ROWS)) return;
+      output.push({
+        sentence: sentence.id, sourceRows, transCues: pieces.length, maxDwellSec,
+      });
+    });
+    return output;
   }
 
   // DISPLAY LAYER ONLY. A translation piece owns one semantic source span, and
@@ -1312,6 +1388,8 @@
     activeTimedItem,
     sourceDisplayLines,
     mergeShortRuns,
+    sourceRowCount,
+    rowDeficitStats,
     sourceCueParts,
     resolveModeLines,
     stageMode,

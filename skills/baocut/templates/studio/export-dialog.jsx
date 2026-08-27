@@ -214,7 +214,9 @@ function ExportVideoPreview({ doc, content }) {
             selected={false} selectedLine={null} showSubs transcribing={false} editingLine={null}
             onCanvasPress={() => null} onSelectLine={() => {}} onEditLine={() => {}}
             onMoveBy={() => {}} onMoveLine={() => {}}
-            elements={elements} elementsKey={elementsKey} selectedElementId={null}
+            elements={elements} elementsKey={elementsKey}
+            timelineTracks={tracks} timelineDuration={duration}
+            selectedElementId={null}
             editingElementId={null} onElementSelect={() => {}} onElementMove={() => {}}
             onElementEdit={() => {}}
           />
@@ -232,9 +234,27 @@ function ExportVideoPreview({ doc, content }) {
   );
 }
 
+// delta===null 有两种原因（export-delta.js 的 delta()）：从没有过基线，或者
+// 基线属于另一个标题的项目。以前两种都悄悄不渲染，用户以为按钮消失是坏了；
+// 现在按原因显示一行中性提示。「基线文件不存在」不在这两种里——那是导出
+// 完成后才能从服务端拿到的信息（result.fallbackReason === 'baselineMissing'），
+// 走的是 main.jsx 完成 toast 里的 fallbackReasonText，不在这里预判。
+const BLOCKED_REASON_TEXT = {
+  noBaseline: '尚无导出基线（先完整导出一次）',
+  titleChanged: '基线对应的标题已变化',
+};
+
 // ---------- 光速修正行（原型 flashfix.jsx FlashFixRow） ----------
-function FlashFixRow({ delta, baselineName, duration, onFix }) {
-  if (!delta) return null;
+function FlashFixRow({ delta, blockedReason, baselineName, duration, onFix }) {
+  if (!delta) {
+    const text = BLOCKED_REASON_TEXT[blockedReason] || BLOCKED_REASON_TEXT.noBaseline;
+    return (
+      <div className="vk-ffrow vk-ffrow--muted">
+        <Ic name="info-circle" size={15} />
+        <span>{text}</span>
+      </div>
+    );
+  }
   if (delta.upToDate) {
     return (
       <div className="vk-ffrow vk-ffrow--clean">
@@ -313,8 +333,8 @@ function ExportDialog({ onClose }) {
     window.addEventListener('bcut-video-export', update);
     return () => window.removeEventListener('bcut-video-export', update);
   }, []);
-  // 导出跑完（进度回到 idle）就收起对话框：文件已经由浏览器下载，toast 报结果，
-  // 留一个只剩「取消/导出」的旧对话框没有意义。
+  // 视频导出跑完（进度回到 idle）后收起对话框；转录稿/字幕下载是同步完成的，
+  // 不走这条进度通道。它们下载后保持对话框打开，让用户直接切到另一类继续导出。
   const startedRef = useRef(false);
   useEffect(() => {
     if (progress != null) { startedRef.current = true; return; }
@@ -373,6 +393,12 @@ function ExportDialog({ onClose }) {
   const delta = app.exportDelta;
   const baseline = app.exportBaseline || {};
   const baselineArtifact = baseline.artifact || {};
+  // delta 为 null 时区分「从没导出过」和「基线是另一个标题的项目」——两条判据
+  // 与 export-delta.js 的 delta() 完全对应（!base.orig / 标题不一致）。
+  const blockedReason = delta ? null
+    : !baseline.orig ? 'noBaseline'
+    : (baseline.title && title && baseline.title !== title) ? 'titleChanged'
+    : 'noBaseline';
 
   const start = () => {
     if (type === 'video') {
@@ -387,7 +413,6 @@ function ExportDialog({ onClose }) {
       download(filename, subtitleText, 'text/plain');
       toast((sFormat === 'vtt' ? 'VTT' : 'SRT') + ' 已下载', { variant: 'positive' });
     }
-    onClose();
   };
 
   const flashFix = () => {
@@ -399,7 +424,10 @@ function ExportDialog({ onClose }) {
   };
 
   const busy = progress != null;
-  const pct = busy ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
+  const pct = busy ? Math.max(0, Math.min(100, Math.round(progress.pct))) : 0;
+  // 新协议才有的观测（elapsedMs/fps/etaMs）；旧服务端整组缺席时返回 null，
+  // 底部就不出现这一行，不假装有预估。
+  const etaText = busy ? X.progressEtaText(progress) : null;
 
   return (
     <Overlay onClose={onClose}>
@@ -431,7 +459,7 @@ function ExportDialog({ onClose }) {
             {type === 'video' ? (
               <>
                 <ExportVideoPreview doc={doc} content={videoContent} />
-                <FlashFixRow delta={delta} duration={doc.meta.duration || 0}
+                <FlashFixRow delta={delta} blockedReason={blockedReason} duration={doc.meta.duration || 0}
                   baselineName={baselineArtifact.filename} onFix={flashFix} />
                 <ExpSegRow name="字幕内容"
                   desc={contentDesc(videoContent,
@@ -490,7 +518,10 @@ function ExportDialog({ onClose }) {
         <div className="vk-aidlg__footer">
           {busy ? (
             <>
-              <span className="vk-exp-phase">正在导出带字幕视频…</span>
+              <span className="vk-exp-phase">
+                正在导出带字幕视频…
+                {etaText ? <span className="vk-exp-eta">{etaText}</span> : null}
+              </span>
               <span className="vk-spacer"></span>
               <button className="s2-btn s2-btn--M s2-btn--secondary" onClick={onClose}>在后台运行</button>
               <ProgressCluster pct={pct} />

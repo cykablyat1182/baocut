@@ -570,3 +570,49 @@
 .bcs-block__whole { margin-left: 4px; opacity: 0.8; font-weight: 700; }
 /* 文字块的标签也带图标（原型只给水印块加了这条），图标与文字因此不叠在一起 */
 .vk-block--text .vk-block__label { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ---- P7c 贴纸选择器（sticker-picker.jsx）与检查器里的同一个网格 ---- */
+/* 一行四个：272px 浮层里十份模板不用滚。格子是配色示意，不是缩略图 ——
+   模板贴纸的点列只在渲染端，浏览器不手抄（sticker-picker.jsx 头部有原因）。 */
+.bcs-stk { padding: 10px; }
+.bcs-stk__head {
+  font-size: var(--font-size-50); font-weight: var(--bold-font-weight);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-subdued); margin: 2px 2px 8px;
+}
+.bcs-stk__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.bcs-stk__tile {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 7px 3px 6px; border-radius: 8px;
+  border: 1px solid transparent; background: var(--gray-100);
+}
+.bcs-stk__tile:hover { background: var(--gray-200); }
+.bcs-stk__tile--sel { border-color: var(--text-accent); }
+.bcs-stk__art {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+}
+.bcs-stk__dot { display: block; border-radius: 999px; }
+.bcs-stk__name {
+  font-size: 10px; line-height: 1.2; color: var(--text-subdued);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bcs-stk__hint {
+  font-size: var(--font-size-50); color: var(--text-subdued);
+  line-height: 1.35; margin: 8px 2px 0;
+}
+.bcs-stk__import {
+  display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 8px;
+  border: 1px dashed var(--gray-300); background: none; border-radius: 8px;
+  padding: 8px 9px; text-align: left; color: var(--text-disabled);
+}
+.bcs-stk__importlbl { display: flex; flex-direction: column; min-width: 0; }
+.bcs-stk__importsub { font-size: var(--font-size-50); color: var(--text-subdued); margin-top: 1px; }
+/* 检查器里的「当前模板」行 */
+.bcs-stk__current { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; }
+.bcs-stk__currentname {
+  display: flex; flex-direction: column; min-width: 0;
+  font-size: var(--font-size-100); color: var(--text-heading);
+  font-weight: var(--medium-font-weight);
+}
+.bcs-stk__currentsub { font-size: var(--font-size-50); color: var(--text-subdued); font-weight: 400; margin-top: 1px; }

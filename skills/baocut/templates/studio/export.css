@@ -87,6 +87,9 @@
 .vk-ffrow .s2-btn { flex: none; }
 .vk-ffrow--clean { background: var(--gray-75, #f8f8f8); color: var(--text-subdued); }
 .vk-ffrow--clean > .s2-icon { color: var(--positive-visual-color); }
+/* 无基线 / 标题已变化：不再静默消失，改成中性提示行 */
+.vk-ffrow--muted { background: var(--gray-75, #f8f8f8); color: var(--text-subdued); }
+.vk-ffrow--muted > .s2-icon { color: var(--text-subdued); }
 
 /* 文本预览 */
 .vk-exp-prevhead { display: flex; align-items: center; gap: 8px; margin: 14px 0 7px; }
@@ -104,3 +107,7 @@
 .vk-exp-file { display: flex; align-items: center; gap: 7px; font-size: var(--font-size-75); color: var(--text-subdued); min-width: 0; }
 .vk-exp-file .vk-mono { color: var(--text-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vk-exp-phase { font-size: var(--font-size-75); font-weight: var(--medium-font-weight); color: var(--text-body); }
+.vk-exp-eta {
+  margin-left: 8px; font-weight: 400; color: var(--text-subdued);
+  font: 11px/1 var(--font-family-code, ui-monospace, Menlo, monospace);
+}

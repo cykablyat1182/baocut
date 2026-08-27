@@ -100,6 +100,16 @@ test('本地转录细阶段归一为转录页并透传有界实时文本', () =>
   assert.deepEqual(status.liveSegments, liveSegments);
 });
 
+test('模型目录等待仍在转录页但携带明确资源等待状态', () => {
+  const status = P.projectStatus({}, job({
+    kind: 'transcribe', stage: 'transcribe', phase: 'model-wait', pct: 34,
+    detail: '等待其他任务释放模型目录 · 12s',
+  }), null, null);
+  assert.equal(status.phase, 'transcribing');
+  assert.equal(status.resourceWait, 'model-store');
+  assert.equal(status.pct, 34);
+});
+
 test('外层 transcribe kind 不覆盖 auto 已前进到的翻译与对齐阶段', () => {
   const aligning = P.projectStatus({}, job({
     kind: 'transcribe', stage: 'align', phase: 'aligning', detail: '拆分并对齐双语字幕',

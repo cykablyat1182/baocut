@@ -220,7 +220,7 @@ function Titlebar({ sidebarOpen, setSidebarOpen, sidebarW, sideDrag, entry }) {
   const metaBits = [fmt(doc.meta.duration), src && src.name, dst ? '→ ' + dst.native : null, doc.meta.model]
     .filter(Boolean).join(' · ');
   const exporting = videoProgress != null;
-  const exportPct = exporting ? Math.max(0, Math.min(100, Math.round(videoProgress))) : 0;
+  const exportPct = exporting ? Math.max(0, Math.min(100, Math.round(videoProgress.pct))) : 0;
   // 已导出视频落后于当前字幕 → 导出按钮挂琥珀徽标，对话框里出现"光速修正"
   const delta = app.exportDelta;
   const fixPending = !exporting && delta && !delta.upToDate;

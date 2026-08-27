@@ -4,7 +4,7 @@ set -eu
 skill_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 skill_md="$skill_root/SKILL.md"
 cli_release_json="$skill_root/cli-release.json"
-required_spec='>=1.11,<2.0'
+required_spec='>=1.31,<2.0'
 
 metadata_value() {
     key=$1
@@ -49,6 +49,7 @@ cargo_manifest=
 cli_source=
 dev_root_found=
 long_local_inference=0
+heavy_local_work=0
 introspection_command=0
 
 # Host architecture, normalized to the Rust target-arch spelling so it can be
@@ -93,12 +94,17 @@ ensure_cargo_on_path() {
 }
 for argument in "$@"; do
     case "$argument" in
-        auto|transcribe) long_local_inference=1 ;;
+        auto|transcribe) long_local_inference=1; heavy_local_work=1 ;;
+        # MP4 export is not ML inference, so the foreign-arch refusal below does
+        # not apply to it, but a debug build is just as ruinous: the encode loop
+        # and the subtitle rasteriser are both hot Rust.
+        export) heavy_local_work=1 ;;
         spec|version|doctor|-h|--help) introspection_command=1 ;;
     esac
 done
 if test "$introspection_command" = 1; then
     long_local_inference=0
+    heavy_local_work=0
 fi
 for variable in BAOCUT_CLI BCUT_EXECUTABLE BAOCUT_BIN; do
     case "$variable" in
@@ -139,23 +145,23 @@ if test -z "$cli" && test "${BAOCUT_SKILL_NO_DEV:-0}" != 1; then
             # Both `cargo run` and scripts/dev/prepare-bcut.sh need cargo.
             ensure_cargo_on_path || true
             # Use the newest workspace binary so Agent discovery never reads a
-            # stale contract after a debug-only development build. Local ML
-            # inference is the exception: debug Rust roughly doubles runtime,
-            # so prepare the release CLI before a long media command.
-            if test "$long_local_inference" = 1 \
+            # stale contract after a debug-only development build. Long local
+            # work is the exception: debug Rust roughly doubles runtime, so
+            # prepare the release CLI before a long media command.
+            if test "$heavy_local_work" = 1 \
                 && test "${BAOCUT_ALLOW_DEBUG_INFERENCE:-0}" != 1 \
                 && { test "$debug_is_newest" = 1 || ! test -x "$release"; }
             then
                 prepare=$dev_root/scripts/dev/prepare-bcut.sh
                 if ! test -x "$prepare"; then
-                    echo "baocut skill: optimized release CLI is required for local transcription, but $prepare is unavailable" >&2
+                    echo "baocut skill: optimized release CLI is required for this command, but $prepare is unavailable" >&2
                     exit 3
                 fi
-                echo "baocut skill: preparing optimized release CLI for local transcription" >&2
+                echo "baocut skill: preparing optimized release CLI for long local work" >&2
                 cli=$("$prepare")
             elif test "$debug_is_newest" = 1; then
                 cli=$debug
-                echo "baocut skill: WARNING using debug build; transcription will be much slower. Build release with scripts/dev/prepare-bcut.sh" >&2
+                echo "baocut skill: WARNING using debug build; transcription and video export will be much slower. Build release with scripts/dev/prepare-bcut.sh" >&2
             elif test -x "$release"; then
                 cli=$release
             elif command -v cargo >/dev/null 2>&1; then
@@ -223,11 +229,20 @@ if test -f "$cli_release_json"; then
         fi
     fi
 fi
-if test -z "$cli$cargo_manifest" && test -n "$cache_bin" && test -x "$cache_bin" \
-    && { test -z "$cache_metallib" || test -s "$cache_metallib"; }
-then
+
+cached_cli_is_complete() {
+    test -n "$cache_bin" && test -x "$cache_bin" \
+        && { test -z "$cache_metallib" || test -s "$cache_metallib"; }
+}
+
+use_cached_cli() {
     cli=$cache_bin
+    cargo_manifest=
     cli_source=cache
+}
+
+if test -z "$cli$cargo_manifest" && cached_cli_is_complete; then
+    use_cached_cli
 fi
 
 run_cli() {
@@ -437,6 +452,16 @@ if test -n "$handshake_failure"; then
             exit "$handshake_exit"
             ;;
     esac
+    # App and PATH remain ahead of the pinned cache during normal resolution,
+    # but an incompatible install must not force a fresh archive download when
+    # this exact version/build is already cached. Validate the cache before
+    # consulting BAOCUT_SKILL_NO_DOWNLOAD or entering the downloader.
+    if test "$cli_source" != cache && cached_cli_is_complete; then
+        use_cached_cli
+        handshake || true
+    fi
+fi
+if test -n "$handshake_failure"; then
     if test -z "$cache_bin" || test "${BAOCUT_SKILL_NO_DOWNLOAD:-0}" = 1; then
         report_failure
         exit "$handshake_exit"

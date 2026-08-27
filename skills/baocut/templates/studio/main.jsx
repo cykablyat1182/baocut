@@ -9,9 +9,15 @@ const ProgressStatus = window.BCS_PROGRESS;
 if (!ProgressStatus) throw new Error('progress-status.js failed to load');
 const P = window.BCS_PANELS;
 if (!P) throw new Error('panels.js failed to load');
+const X = window.BCS_EXPORT_TEXT;
+if (!X) throw new Error('export-text.js failed to load');
 
 let videoExportRunning = false;
-const reportVideoExport = (progress) => window.dispatchEvent(new CustomEvent('bcut-video-export', { detail: progress }));
+// detail 是 { pct, done? } 加 __bcut/export/video/status 平铺透传的观测字段
+// （running 态：elapsedMs/fps/etaMs；done 态：result，见 export-text.js 的
+// progressEtaText/renderModeText 注释）；idle 时是 null。两个消费者
+// （export-dialog.jsx 对话框内进度条、shell.jsx 标题栏按钮）都只认这个形状。
+const reportVideoExport = (detail) => window.dispatchEvent(new CustomEvent('bcut-video-export', { detail }));
 
 // opts.patch = store 的 exportDelta（光速修正：只有受影响的时间窗需要重渲；
 // patchRanges 随请求下发，供服务端做区间重渲+拼接，旧服务端忽略该字段并全片
@@ -29,7 +35,7 @@ async function exportVideo(base, doc, opts) {
   }
   videoExportRunning = true;
   try {
-    reportVideoExport(0);
+    reportVideoExport({ pct: 0 });
     toast(patch
       ? `正在光速修正导出视频 · ${patch.count} 处改动…`
       : '正在导出带字幕视频…');
@@ -50,19 +56,32 @@ async function exportVideo(base, doc, opts) {
       if (!response.ok || !status.ok) throw new Error(status.error || `HTTP ${response.status}`);
       if (status.state === 'error') throw new Error(status.error || '视频导出失败');
       if (status.state === 'running' && status.total > 0) {
-        reportVideoExport(Math.min(99, Math.round(status.done / status.total * 100)));
+        // elapsedMs/fps/etaMs 是新协议才有的可选观测字段（旧服务端整组缺席）；
+        // 平铺透传，缺席就缺席，由 export-text.js 的 progressEtaText 判断怎么呈现。
+        reportVideoExport({
+          pct: Math.min(99, Math.round(status.done / status.total * 100)),
+          done: status.done, total: status.total,
+          elapsedMs: status.elapsedMs, fps: status.fps, etaMs: status.etaMs,
+        });
       }
       if (status.state !== 'done') continue;
-      reportVideoExport(100);
+      // result 是新协议才有的完成信封（renderMode/fallbackReason/videoBitrate/
+      // timing 等，见 docs/bcut-cli-server-reference.md 观测字段）；旧服务端
+      // 没有这个 key，下面两个 text 都会安全地变成 null，不追加后缀。
+      const result = status.result || {};
+      reportVideoExport({ pct: 100, done: true, result, fallbacks: status.fallbacks });
       const a = document.createElement('a');
       a.href = '__bcut/export/video/file';
       a.download = base + '.mp4';
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast(patch
+      const modeText = X.renderModeText(result);
+      const fallbackText = X.fallbackReasonText(result.fallbackReason);
+      const suffix = [modeText, fallbackText].filter(Boolean).join(' · ');
+      toast((patch
         ? `已修正导出视频 · ${patch.count} 处改动`
-        : '带字幕视频已导出', { variant: 'positive' });
+        : '带字幕视频已导出') + (suffix ? ' · ' + suffix : ''), { variant: 'positive' });
       if (opts && opts.onDone) opts.onDone(doc, base + '.mp4');
       // Keep the completed bar visible long enough to register before returning
       // the titlebar button to its idle state.

@@ -30,7 +30,7 @@ function ConvertTo-CliArgumentList([object[]] $Arguments) {
 }
 
 [string[]] $CliArgs = ConvertTo-CliArgumentList $RawCliArgs
-$requiredSpec = ">=1.14,<2.0"
+$requiredSpec = ">=1.31,<2.0"
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $skillMarkdown = Join-Path $skillRoot "SKILL.md"
 # Set by Resolve-DevelopmentCli so handshake failures can name the right remedy.

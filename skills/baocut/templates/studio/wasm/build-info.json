@@ -1,0 +1,15 @@
+{
+  "note": "由 scripts/dev/sync-studio-wasm.sh 生成；不要手改，也不要手改同目录的两个产物",
+  "source": "core/crates/bcut-wasm",
+  "design": "docs/bcut-element-render-foundation-design.md §9.2 / §9.3 / §10 P6",
+  "repoCommit": "3c0586d75a8e2860590af45e91da957b36683d0e",
+  "cargoProfile": "wasm-release",
+  "target": "wasm32-unknown-unknown",
+  "wasmBindgen": "0.2.126",
+  "binaryen": "wasm-opt version 132",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+  "files": {
+    "bcut_wasm.js": { "bytes": 17855, "sha256": "e91c5f5f185d20ade726a4a0a1577e5066025b8ddf498c29e0fa733b77f7335c" },
+    "bcut_wasm_bg.wasm": { "bytes": 1715721, "sha256": "3e393bdf07c5bc00ff0fcbfcf1e8b247e0c5f60e8a5898071d8418c7d6f62445" }
+  }
+}

@@ -19,6 +19,8 @@ const SCE = window.BCS_SOURCE_CUE_EDIT;
 const TR = window.BCS_TRANSPORT;
 const LANES = window.BCS_TIMELINE_LANES;   // 重叠元素摊成显示行（timeline-lanes.js）
 const ET = window.BCS_ELEMENT_TIME;        // 元素窗口钳制（element-time.js）
+const EG = window.BCS_ELEMENT_GEOMETRY;    // 可渲染 kind 白名单（element-geometry.js）
+const EOPS = window.BCS_ELEMENT_OPS;       // 元素称呼（element-ops.js）
 
 const THUMB_W = 84;    // filmstrip tile width (px) — global grid, gap-free
 const OVERSCAN = 400;  // virtualization overscan (px) either side of the viewport
@@ -153,27 +155,41 @@ function ElementBlock({ element, x, w, h, selected, whole, label, icon, wm, onSe
   );
 }
 
-// 一行的图标与名字：一条逻辑轨里可能同时有文本和图片，所以按行里的元素判定
-// （水印 → layers / 图片 → image / 文字 → text-lines / 混装 → properties）。
+// 一行的图标与名字：一条逻辑轨里可能同时装着几种元素，所以按行里的元素判定
+// （水印 → layers / 单一 kind → 该 kind 的图标与名字 / 混装 → properties）。
+const ELEMENT_ROW_ICONS = {
+  wm: 'layers', text: 'text-lines', image: 'image',
+};
+
+function elementRowKind(element) {
+  return element.role === 'watermark' ? 'wm' : element.kind;
+}
+
 function elementRowMeta(elements) {
-  const kinds = new Set(elements.map((element) => (element.role === 'watermark'
-    ? 'wm'
-    : (element.kind === 'image' ? 'image' : 'text'))));
+  const kinds = new Set(elements.map(elementRowKind));
   if (kinds.size === 1) {
     const only = kinds.values().next().value;
     if (only === 'wm') return { icon: 'layers', name: '水印' };
-    if (only === 'image') return { icon: 'image', name: '图片' };
-    return { icon: 'text-lines', name: '文字' };
+    const name = EOPS ? EOPS.elementLabel(elements[0]) : '叠加元素';
+    return { icon: ELEMENT_ROW_ICONS[only] || 'properties', name: only === 'text' ? '文字' : name };
   }
   return { icon: 'properties', name: '叠加元素' };
 }
 
-// 块上的名字：文本取前若干字，图片就叫「图片」（投影里没有文件名，只有 srcId）。
+// 块上的名字：文本取前若干字，其余 kind 用它自己的称呼（投影里没有文件名，
+// 只有 srcId；形状再补一句形状名，一条轨上四个矩形否则长得一模一样）。
 function elementBlockLabel(element) {
-  if (element.kind === 'image') return element.name || '图片';
-  const text = String(element.text == null ? '' : element.text).replace(/\s+/g, ' ').trim();
-  if (!text) return '空文本';
-  return text.length > 24 ? text.slice(0, 24) + '…' : text;
+  if (element.kind === 'text') {
+    const text = String(element.text == null ? '' : element.text).replace(/\s+/g, ' ').trim();
+    if (!text) return '空文本';
+    return text.length > 24 ? text.slice(0, 24) + '…' : text;
+  }
+  if (element.name) return element.name;
+  const label = EOPS ? EOPS.elementLabel(element) : '元素';
+  if (element.kind === 'shape' && element.shape && element.shape.shape) {
+    return label + ' · ' + element.shape.shape;
+  }
+  return label;
 }
 
 // ---------- 章节 scrubber ----------
@@ -347,8 +363,10 @@ function TimelinePane() {
     const rows = [];
     [...tracks].reverse().forEach((track) => {
       if (!track || track.hidden === true) return;
+      // 白名单与画布层同源（element-geometry.js）：画得出来的就该在时间轴上排一行。
+      // 各写一份 kind 列表 = 新元素在画面上看得见、在时间轴上找不到。
       const elements = (track.elements || []).filter((element) => element
-        && (element.kind === 'text' || element.kind === 'image'));
+        && (EG ? EG.isRenderableKind(element.kind) : (element.kind === 'text' || element.kind === 'image')));
       if (!elements.length) return;
       const plan = LANES.plan(elements, dur);
       [...plan.lanes].reverse().forEach((lane) => {
@@ -485,8 +503,8 @@ function TimelinePane() {
           <QBtn icon="delete" size="S" tip="删除所选（⌫）" tipDir="up"
             disabled={!selectedCue && !selectedElement} onClick={deleteSelected} />
           <span className="vk-fmtbar__sep"></span>
-          {/* 添加叠加元素（原型 timeline.jsx 的 Add 菜单）。B-roll 的两个视频项
-              本轮省略（决策 D16），所以这里只有文本 / 图片 / 水印。 */}
+          {/* 添加叠加元素（原型 timeline.jsx 的 Add 菜单）。贴纸创建入口暂时隐藏；
+              已有项目里的贴纸仍由渲染与属性面板路径兼容。 */}
           <button ref={addRef} className="s2-btn s2-btn--S s2-btn--secondary"
             data-tip="在播放头处添加叠加元素" data-tip-dir="up" aria-label="添加元素"
             onClick={() => setAddOpen(true)}>
@@ -614,7 +632,7 @@ function TimelinePane() {
                       h={24}
                       selected={!!(app.sel && app.sel.kind === 'el' && app.sel.id === element.id)}
                       whole={whole} wm={element.role === 'watermark'}
-                      icon={element.role === 'watermark' ? 'layers' : (element.kind === 'image' ? 'image' : 'text-lines')}
+                      icon={ELEMENT_ROW_ICONS[elementRowKind(element)] || 'properties'}
                       label={elementBlockLabel(element)}
                       onSelect={() => app.setSel({ kind: 'el', id: element.id })}
                       onSeek={() => app.seek(span.start + 0.01)}

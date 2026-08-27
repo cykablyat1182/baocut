@@ -216,3 +216,48 @@ test('时间码进位到小时', () => {
   assert.equal(X.clockTime(3661.5), '01:01:01');
   assert.equal(X.clockTime(61), '01:01');
 });
+
+// ---------- 视频导出观测：ETA / 渲染方式 ----------
+
+test('progressEtaText：旧服务端整组观测缺席时不渲染', () => {
+  assert.equal(X.progressEtaText(null), null);
+  assert.equal(X.progressEtaText({}), null);
+  assert.equal(X.progressEtaText({ done: 3, total: 10 }), null);
+});
+
+test('progressEtaText：预热窗口（有 elapsedMs，无 fps/etaMs）显示"正在预估…"', () => {
+  assert.equal(X.progressEtaText({ elapsedMs: 1200 }), '正在预估…');
+});
+
+test('progressEtaText：预热窗口但已有 fps 时附带速率', () => {
+  assert.equal(X.progressEtaText({ elapsedMs: 2800, fps: 118.4 }), '正在预估… · 118 fps');
+});
+
+test('progressEtaText：不足 1 分钟显示秒数', () => {
+  assert.equal(X.progressEtaText({ elapsedMs: 5000, fps: 229.73, etaMs: 45000 }), '剩余约 45 秒 · 230 fps');
+  // 不满 1 秒也至少显示 1 秒，不显示"剩余约 0 秒"
+  assert.equal(X.progressEtaText({ elapsedMs: 5000, etaMs: 200 }), '剩余约 1 秒');
+});
+
+test('progressEtaText：满 1 分钟按分钟取整', () => {
+  assert.equal(X.progressEtaText({ elapsedMs: 18500, fps: 229.73, etaMs: 90000 }), '剩余约 2 分钟 · 230 fps');
+  assert.equal(X.progressEtaText({ elapsedMs: 5000, etaMs: 60000 }), '剩余约 1 分钟');
+});
+
+test('renderModeText：patch 带补丁窗数，full 是整片重渲，缺 renderMode 不渲染', () => {
+  assert.equal(X.renderModeText({ renderMode: 'patch', patchedRanges: 2 }), '光速修正：仅重渲 2 处');
+  assert.equal(X.renderModeText({ renderMode: 'patch' }), '光速修正');
+  assert.equal(X.renderModeText({ renderMode: 'full' }), '整片重渲');
+  assert.equal(X.renderModeText(null), null);
+  assert.equal(X.renderModeText({}), null);
+});
+
+test('fallbackReasonText：四个稳定枚举值都有可读文案，未知值兜底，无原因不渲染', () => {
+  assert.equal(X.fallbackReasonText('baselineMissing'), '基线文件不存在');
+  assert.equal(X.fallbackReasonText('emptyRanges'), '光速修正窗口为空');
+  assert.equal(X.fallbackReasonText('baseDocumentMismatch'), '基线与当前文档不匹配');
+  assert.equal(X.fallbackReasonText('patchUnavailable'), '当前环境不支持区间重渲');
+  assert.equal(X.fallbackReasonText('somethingNew'), '光速修正未生效，已整片重渲');
+  assert.equal(X.fallbackReasonText(null), null);
+  assert.equal(X.fallbackReasonText(undefined), null);
+});

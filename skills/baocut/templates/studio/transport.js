@@ -9,6 +9,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, () => {
   // 原型 app/playback-policy.js 的 VK_PLAYBACK.rates，顺序即菜单顺序。
   const RATES = Object.freeze([0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]);
+  const PLAYHEAD_STORAGE_PREFIX = 'bcs:playhead:';
 
   // 标尺步长候选（秒）。原型 timeline.jsx tickStep 用同一张表 + 90px 目标间距。
   const RULER_STEPS = Object.freeze([1, 2, 5, 10, 15, 30, 60, 120, 300]);
@@ -40,6 +41,16 @@
 
   const finite = (value) => typeof value === 'number' && Number.isFinite(value);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+
+  // A single serve can expose multiple projects under /projects/<id>/… . The
+  // playhead is viewing state, but it still belongs to one project: sharing the
+  // old global localStorage key made opening project B overwrite project A's
+  // resume point. Root-mounted projects retain one stable fallback scope.
+  function playbackStorageKey(pathname) {
+    const path = typeof pathname === 'string' ? pathname : '';
+    const match = path.match(/^\/projects\/([^/]+)(?:\/|$)/);
+    return PLAYHEAD_STORAGE_PREFIX + (match ? match[1] : 'root');
+  }
 
   // 落到最近的合法档位；非法输入回到 1×。菜单之外的来源（持久化、URL）也走这里。
   function normalizeRate(rate) {
@@ -176,9 +187,9 @@
   }
 
   return {
-    RATES, RULER_STEPS, RULER_TARGET_PX, PAD, PREV_EPSILON, NEXT_EPSILON,
+    RATES, PLAYHEAD_STORAGE_PREFIX, RULER_STEPS, RULER_TARGET_PX, PAD, PREV_EPSILON, NEXT_EPSILON,
     FS_SEEK, FS_SEEK_FAR, FS_VOL_STEP, NUDGE_FINE, NUDGE_COARSE, PLACE_X, PLACE_Y,
-    normalizeRate, speedLabel, styleCtx, styleLabel, styleTip,
+    playbackStorageKey, normalizeRate, speedLabel, styleCtx, styleLabel, styleTip,
     prevCueStart, nextCueStart, isReplay,
     rulerStep, rulerTicks, timeToX, xToTime, contentWidth,
     fullscreenKeyAction, nudgeStep, nudgeDelta, clampPlacement,

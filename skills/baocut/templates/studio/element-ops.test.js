@@ -98,6 +98,13 @@ test('setText / removeElement / elementLabel', () => {
   assert.strictEqual(OPS.elementLabel({ kind: 'text', role: 'watermark' }), '水印');
   assert.strictEqual(OPS.elementLabel({ kind: 'image' }), '图片');
   assert.strictEqual(OPS.elementLabel({ kind: 'text' }), '文本');
+  // core 0.2 的四个新 kind 各有名字，不落兜底。
+  assert.strictEqual(OPS.elementLabel({ kind: 'shape' }), '形状');
+  assert.strictEqual(OPS.elementLabel({ kind: 'sticker' }), '贴纸');
+  assert.strictEqual(OPS.elementLabel({ kind: 'visualizer' }), '波形');
+  assert.strictEqual(OPS.elementLabel({ kind: 'progress' }), '进度条');
+  // 认不出来的 kind 仍走兜底，而不是当文本。
+  assert.strictEqual(OPS.elementLabel({ kind: 'motion' }), '元素');
   assert.strictEqual(OPS.elementLabel(null), '元素');
 });
 
@@ -122,4 +129,21 @@ test('replaceImageSource：新 source + 只改 srcId（不覆盖旧 source）', 
     source: { path: 'media/new.png', kind: 'image', duration: 0, naturalW: 100, naturalH: 50 },
   });
   assert.deepStrictEqual(ops[1], { kind: 'patchElement', elId: 'el-4', set: { srcId: 'src-new' } });
+});
+
+test('addStickerElement：一条 op、source 用 0.2 拼写、不写恒等于缺省的 loop', () => {
+  const op = OPS.addStickerElement({ templateId: 'heart', time: 3.27, duration: 60 });
+  assert.strictEqual(op.kind, 'addElement');
+  assert.strictEqual(op.element.kind, 'sticker');
+  assert.deepStrictEqual(op.element.sticker, { source: 'template', templateId: 'heart' });
+  // loop 只对动态（alpha WebM 资产）贴纸有意义，静态模板不写它
+  assert.ok(!('loop' in op.element.sticker));
+  // 模板库随构建走 —— 没有 source 要注册，所以是一条 op 不是两条
+  assert.deepStrictEqual(op.element.place, { ...OPS.STICKER_PLACE });
+  assert.strictEqual(op.element.start, 3.2);
+  assert.strictEqual(op.element.end, 3.2 + OPS.STICKER_SECONDS);
+  // 片尾之前不足一个窗口：窗口往前挪，不造出 end <= start 的非法元素
+  const tail = OPS.addStickerElement({ templateId: 'crown', time: 59.9, duration: 60 });
+  assert.ok(tail.element.end > tail.element.start);
+  assert.ok(tail.element.end <= 60);
 });
