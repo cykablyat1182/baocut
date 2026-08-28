@@ -787,6 +787,23 @@ spending another call:
   its source duration is short; only repair it when a safe neighboring merge or
   timing cut exists.
 
+`translate` already runs one automatic glued-row closing round per language:
+after the main align completes it re-detects `align-row-deficit` hits and
+re-cuts up to 40 of them in a targeted `--align-density paired` pass that
+writes only `transAlign` (the `--json` summary reports it as `rowRepairAuto`
+/ `rowRepairAutoSkipped`; `--no-row-repair` opts out). So an
+`align-row-deficit` warning that survives the post-translate strict check is
+usually a residual that automatic round already tried and rejected — a very
+short translation, or a sentence with no usable semantic seam. Fold those into
+the consolidated repair below: name them in one
+`translate --align-only --align-density paired --sentences …` command, or let
+`refine-align --only-hard` collect them with the other hotspots. Do not rerun
+translate for them, and do not keep re-dispatching a small stable set of
+rejected residuals between checks — record that they were reviewed instead.
+Timeline projects (`translate --timeline`) never get the automatic round and
+emit an advisory; there the manual `check` + `refine-align` loop is still the
+closing path.
+
 Fast `auto` returns `data.refineOffer[]` instead of running this repair itself.
 In the completion summary, quote the offer's benefit and cost fields and ask
 whether the user wants the priority command now. This is a real decision gate:
@@ -821,7 +838,8 @@ undersells the payload:
   over fit but under hard (the 16–20 gray band). Every other objective
   hotspot is still collected — `align-stale`, `align-source-ceiling`,
   `align-source-seam`, `align-target-seam`, `align-source-fragment`,
-  `align-paired-density`, `align-bilingual-anchor`,
+  `align-paired-density`, `align-row-deficit` (those sentences carry `paired`
+  density inside the same round), `align-bilingual-anchor`,
   `align-degraded-fallback` (each capped at 40 sentences per round) and
   `translation-overflow`. So a check that lists 2 hard sentences routinely
   becomes a 55-sentence `refine-align` payload; that is by design, not a bug.

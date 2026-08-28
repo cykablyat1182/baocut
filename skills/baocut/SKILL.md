@@ -13,8 +13,8 @@ description: >-
   documentation tasks follow repository instructions unless they also operate
   the product or a `.bcut` project.
 metadata:
-  version: "1.1.3"
-  minAppVersion: "1.1.3"
+  version: "1.1.4"
+  minAppVersion: "1.1.4"
 ---
 
 # BaoCut

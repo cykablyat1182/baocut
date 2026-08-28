@@ -230,7 +230,9 @@ input.vk-group__sp-name { width: min(180px, 16ch); height: 18px; box-sizing: bor
 /* the playing paragraph reads via a soft accent OUTER FRAME — not a full-text
    background wash (the karaoke word colors already carry reading progress) */
 .vk-para--active {
-  border-radius: 7px;
+  /* square on the left so the ring stays flush with the .vk-group speaker rail
+     (a rounded left edge arcs across it) */
+  border-radius: 0 7px 7px 0;
   box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent-color-700) 50%, transparent);
 }
 

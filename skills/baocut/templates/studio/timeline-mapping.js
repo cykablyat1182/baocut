@@ -274,8 +274,16 @@
     return srcId && srcId !== 'main' ? `__bcut/media?src=${encodeURIComponent(srcId)}` : '__bcut/media';
   }
 
+  function playbackSpans(chapters, duration, projectTitle) {
+    const authored = (chapters || []).filter((chapter) => chapter.end > chapter.start);
+    return authored.length || !(duration > 0)
+      ? authored
+      : [{ id: 'playback', title: projectTitle || '', start: 0, end: duration, playbackOnly: true }];
+  }
+
   return {
     buildProjection, fromStudio, sourceToView, sourceToViewAtSeam, viewToSource,
-    sourceToTimeline, timelineToSource, clampSourceEvent, projectTimedItems, playbackStep, mediaURL,
+    sourceToTimeline, timelineToSource, clampSourceEvent, projectTimedItems, playbackStep,
+    mediaURL, playbackSpans,
   };
 });

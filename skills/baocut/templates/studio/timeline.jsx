@@ -21,6 +21,7 @@ const LANES = window.BCS_TIMELINE_LANES;   // 重叠元素摊成显示行（time
 const ET = window.BCS_ELEMENT_TIME;        // 元素窗口钳制（element-time.js）
 const EG = window.BCS_ELEMENT_GEOMETRY;    // 可渲染 kind 白名单（element-geometry.js）
 const EOPS = window.BCS_ELEMENT_OPS;       // 元素称呼（element-ops.js）
+const TM = window.BCS_TIMELINE;             // 播放条无章节 fallback（timeline-mapping.js）
 
 const THUMB_W = 84;    // filmstrip tile width (px) — global grid, gap-free
 const OVERSCAN = 400;  // virtualization overscan (px) either side of the viewport
@@ -195,10 +196,13 @@ function elementBlockLabel(element) {
 // ---------- 章节 scrubber ----------
 // 原型 timeline.jsx ChapterScrubber 的 Studio 版：hover 出缩略图预览，点击定位。
 // 缩略图走 VK_MEDIA（真实帧），拿不到时退回章节色相渐变。
-function ChapterScrubber({ dur, playT, onSeek, chapters, hasVideoMedia, strip }) {
+function ChapterScrubber({ dur, playT, onSeek, chapters, hasVideoMedia, strip, title }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);           // {x, t, title, hue}
   const [thumbT, setThumbT] = useState(null);
+  // Chapters divide the playback bar; they are not a prerequisite for it.
+  // Keep transcript-only projects seekable with one project-titled full-duration span.
+  const spans = TM.playbackSpans(chapters, dur, title);
   // 快速划过会跨上百个 0.5s 关键帧：先让已生成的胶片跟手，指针稍稳再向 ffmpeg
   // 要那一帧的精确缩略图。
   const thumbKey = hover && hasVideoMedia
@@ -241,7 +245,7 @@ function ChapterScrubber({ dur, playT, onSeek, chapters, hasVideoMedia, strip })
 
   return (
     <div className="vk-scrub" ref={ref} onPointerLeave={() => setHover(null)}>
-      {chapters.map((c, i) => {
+      {spans.map((c, i) => {
         const w = ((c.end - c.start) / dur) * 100;
         const fill = playT <= c.start ? 0
           : playT >= c.end ? 100
@@ -488,6 +492,7 @@ function TimelinePane() {
       {/* chapter scrubber */}
       {contentReady ? (
         <ChapterScrubber dur={dur} playT={player.t} onSeek={app.seek} chapters={doc.chapters}
+          title={doc.meta.title}
           hasVideoMedia={hasVideoMedia} strip={strip} />
       ) : (
         <div className="vk-scrub vk-scrub--loading" aria-hidden="true"><span></span></div>

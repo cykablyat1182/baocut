@@ -88,8 +88,10 @@ continued—repeat step 2 and verify the project page before proceeding.
 
 `auto` defaults to **fast mode**: it completes transcription, polish,
 translation, and required alignment, but skips optional closing refinement.
-Use `--refine` only when the user chooses quality-first execution before the
-run.
+Both modes include the translation stage's built-in glued-row closing round
+(the automatic `align-row-deficit` re-cut described under Explicit stages) —
+it is part of required alignment, not the optional refinement. Use `--refine`
+only when the user chooses quality-first execution before the run.
 
 ```bash
 bin/baocut auto "<dir>/My Talk.bcut" --llm agent --jsonl
@@ -350,6 +352,19 @@ transcript is unpolished or a candidate is pending, reports it as a
 costs no extra call — polish emits it in the same pass. `auto` stops on the same
 pending candidate; accept it, or state an intent with `--polish` (discard the
 candidate and polish again) or `--no-polish`.
+
+After each language's main alignment, `translate` also runs one automatic
+glued-row closing round: it re-detects `align-row-deficit` hits (one
+translated cue dwelling across several source subtitle rows) and re-cuts up
+to 40 of them in a targeted `--align-density paired` pass that writes only
+`transAlign`. The `--json` per-language summary reports it as `rowRepairAuto`
+/ `rowRepairAutoSkipped`, and `--no-row-repair` opts out; `auto`'s embedded
+translate round gets the same tail. A hit that still shows up in the
+post-run `check --strict` is usually a rejected residual (very short
+translation, no usable seam) — hand it to `refine-align` or a targeted
+paired command instead of rerunning translate. Timeline-variant projects
+skip this tail and print an advisory to close the loop manually with
+`check` + `refine-align`.
 
 The first translation for a target language creates
 `ai/brief-<lang>.json`, and the same brief is also written as

@@ -71,6 +71,15 @@ test('Studio wire projection preserves seam direction and media routing', () => 
   });
 });
 
+test('playback progress keeps one span when the project has no chapters', () => {
+  assert.deepEqual(T.playbackSpans([], 90, 'Project title'), [
+    { id: 'playback', title: 'Project title', start: 0, end: 90, playbackOnly: true },
+  ]);
+  assert.deepEqual(T.playbackSpans([{ id: 'c1', start: 0, end: 10 }], 90), [
+    { id: 'c1', start: 0, end: 10 },
+  ]);
+});
+
 test('translation cues stay single across a collapsed cut but separate across reuse', () => {
   const rows = T.projectTimedItems({
     main: { transCues: [{ id: 's-1#0', start: 9, end: 21, text: 'visible translation' }] },
