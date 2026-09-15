@@ -1,0 +1,86 @@
+name: Build unsigned iOS artifacts (source bundle)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "source-bundle-v2.zip"
+      - ".github/workflows/build-ios-unsigned-v2.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-14
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/yingyu_player
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Restore source bundle
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          restore_dir="${RUNNER_TEMP}/baocut-source"
+          rm -rf "$restore_dir"
+          mkdir -p "$restore_dir"
+          unzip -q -o source-bundle-v2.zip -d "$restore_dir"
+          cp -a "$restore_dir/." "$GITHUB_WORKSPACE/"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.6"
+          channel: stable
+          cache: true
+
+      - name: Record Xcode version
+        run: xcodebuild -version | tee "$RUNNER_TEMP/xcode-version.txt"
+
+      - name: Fetch Flutter packages
+        run: flutter pub get
+
+      - name: Build unsigned device app
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned device app as IPA-shaped artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="${GITHUB_WORKSPACE}/apps/yingyu_player/build/ios/iphoneos/Runner.app"
+          test -d "$app"
+          staging="${RUNNER_TEMP}/yingyu-ipa-staging"
+          rm -rf "$staging"
+          mkdir -p "$staging/Payload"
+          cp -R "$app" "$staging/Payload/Runner.app"
+          (cd "$staging" && zip -qry "$RUNNER_TEMP/yingyu-ios-unsigned.ipa" Payload)
+
+      - name: Build unsigned simulator app
+        id: simulator
+        continue-on-error: true
+        run: flutter build ios --simulator --release --no-codesign
+
+      - name: Package simulator app
+        if: steps.simulator.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="${GITHUB_WORKSPACE}/apps/yingyu_player/build/ios/iphonesimulator/Runner.app"
+          test -d "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/yingyu-ios-simulator.zip"
+
+      - name: Upload unsigned artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yingyu-ios-unsigned-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/yingyu-ios-unsigned.ipa
+            ${{ runner.temp }}/yingyu-ios-simulator.zip
+            ${{ runner.temp }}/xcode-version.txt
