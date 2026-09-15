@@ -1,0 +1,59 @@
+name: yingyu_player
+description: 影语——面向 Windows、Android、iPhone 与 iPad 的原生双语字幕学习播放器。
+publish_to: 'none'
+version: 1.20.1+47
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  crypto: ^3.0.7
+  ffmpeg_kit_flutter_new_min: 3.6.2
+  file_picker: ^11.0.2
+  http: ^1.6.0
+  media_kit: ^1.2.6
+  media_kit_libs_video: ^1.0.7
+  media_kit_video: ^2.0.1
+  mime: ^2.0.0
+  path_provider: ^2.1.6
+  qr_flutter: ^4.1.0
+  shared_preferences: ^2.5.5
+  uuid: ^4.6.0
+  url_launcher: 6.3.2
+  webview_flutter: ^4.14.1
+  webview_flutter_wkwebview: ^3.25.1
+  webview_flutter_windows: ^1.1.1
+  window_manager: ^0.5.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/demo-poster.png
+    - assets/fonts/OFL-1.1.txt
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Variable.ttf
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/Lora-Variable.ttf
+
+flutter_launcher_icons:
+  android: true
+  image_path: assets/images/app-icon.png
+  min_sdk_android: 24
+  windows:
+    generate: true
+    image_path: assets/images/app-icon.png
+    icon_size: 256
