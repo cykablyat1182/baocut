@@ -1,23 +1,30 @@
 # BaoCut agent skill
 
+## 影语原生学习播放器
+
+本仓库新增了面向 Windows、Android、iOS 与 iPadOS 的原生双语学习播放器「影语」。它借鉴 BaoCut 的
+`转写 → 翻译 → 对齐 → 导出` 流程，但播放层不使用网页或 WebView，而是由 Flutter
+原生窗口与 `media_kit/libmpv` 承担。
+
+- [播放器源码与运行说明](apps/yingyu_player/README.md)
+- [GitHub Actions 无签名 iOS/iPadOS 构建](.github/workflows/build-ios-unsigned.yml)
+- [独立 Windows 后台管理端](apps/yingyu_admin/README.md)
+- [SeedASR 2.0 / TOS / 火山方舟处理服务](services/media_pipeline/README.md)
+- [Windows 播放页视觉方案](design/windows-player-concept.png)
+- [Android 横屏视觉方案](design/android-player-concept.png)
+
 Give your AI coding agent the power to drive **[BaoCut](https://baocut.app)** —
-transcribe, add and translate subtitles, review speakers, edit timelines and
-overlays, and export — all from natural language. This is the open-source
-[Agent Skill](https://skills.sh) for BaoCut's local `bcut` CLI and browser-based
-Subtitle Studio.
+transcribe, add & translate subtitles, review speakers, clean up talking-head
+video, and export — all from natural language. This is the open-source
+[Agent Skill](https://skills.sh) that wraps the `baocut` command-line tool.
 
 Works with **Claude Code**, **Codex**, and any [skills.sh](https://skills.sh)-compatible agent.
 
 ## Requirements
 
-- **macOS** — install BaoCut from **[baocut.app](https://baocut.app)**. The skill
-  uses the CLI bundled in `BaoCut.app`; on Apple silicon it can also download
-  the signed standalone CLI pinned to the skill release.
-- **Windows x64** — the resolver installs a verified unsigned-preview CLI when
-  no compatible override, `PATH` entry, or cache exists. It uses `nvidia-smi`
-  to select the bundled CUDA 13 build for an NVIDIA GPU with compute capability
-  8.0+ and driver 580+, otherwise it selects the CPU build. No CUDA Toolkit is
-  required.
+- **macOS** — BaoCut is a Mac app.
+- **The BaoCut app** — install it from **[baocut.app](https://baocut.app)**. The
+  skill drives the CLI bundled inside `BaoCut.app`; it does not ship the engines.
 - **Node.js** — only for the one-command install below
   ([download](https://nodejs.org/en/download)). The manual steps need no Node.
 
@@ -50,16 +57,16 @@ Once installed, just ask your agent — for example:
   Chinese," or the Chinese equivalent 转写并翻译字幕. You can also type `/baocut`.
 - **Codex** — reference the baocut skill in your prompt; it drives the `baocut` CLI.
 
-Under the hood the agent uses the bundled resolver to run commands like:
+Under the hood the agent runs commands like:
 
 ```sh
-skills/baocut/bin/baocut --json auto talk.mp4 --lang zh
-skills/baocut/bin/baocut export <projectId> --srt --translated --lang zh
+baocut --json auto talk.mp4 --lang zh    # transcribe -> polish -> translate
+baocut export <projectId> --srt --translated --lang zh
 ```
 
-The resolver honors an explicit CLI path, development builds, the CLI inside
-BaoCut.app, `bcut` on `PATH`, and verified release caches/downloads in that
-order.
+If `baocut` is not on your PATH, use the bundled resolver
+`skills/baocut/bin/baocut` (it points at `/Applications/BaoCut.app/Contents/MacOS/baocut-cli`
+and tells you to install the app if it is missing).
 
 ## Layout
 
@@ -67,11 +74,7 @@ order.
 skills/baocut/
   SKILL.md          # agent entry point (router)
   references/       # per-task guides (orchestration, editing, export, …)
-  templates/        # browser-based Subtitle Studio
-  cli-release.json  # immutable standalone CLI pin
-  bin/baocut        # resolves, verifies, and runs the matching CLI
-  bin/baocut.ps1    # native Windows resolver
-  bin/detect-windows-cli-variant.ps1 # CPU/CUDA environment probe
+  bin/baocut        # resolves the CLI inside the installed BaoCut.app
 ```
 
 ## Links
